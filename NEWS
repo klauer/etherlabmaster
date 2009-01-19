@@ -6,6 +6,12 @@ vim: spelllang=en spell
 
 -------------------------------------------------------------------------------
 
+Changes since 1.4.0:
+
+* Implemented the File Access over EtherCAT (FoE) mailbox protocol.
+* Going to the Bootstrap state is now supported by the state machines and the
+  command-line tool.
+
 Changes in version 1.4.0:
 
 * Fixed race condition in jiffy-based frame timeout calculation.

@@ -52,6 +52,7 @@ uint8_t *ec_slave_mbox_prepare_send(const ec_slave_t *slave, /**< slave */
                                     )
 {
     size_t total_size;
+    uint16_t mailbox_offset, mailbox_size;
 
     if (unlikely(!slave->sii.mailbox_protocols)) {
         EC_ERR("Slave %u does not support mailbox communication!\n",
@@ -60,14 +61,22 @@ uint8_t *ec_slave_mbox_prepare_send(const ec_slave_t *slave, /**< slave */
     }
 
     total_size = size + 6;
-    if (unlikely(total_size > slave->sii.rx_mailbox_size)) {
+
+    if (slave->current_state != EC_SLAVE_STATE_BOOT) {
+        mailbox_offset = slave->sii.std_rx_mailbox_offset;
+        mailbox_size = slave->sii.std_rx_mailbox_size;
+    } else {
+        mailbox_offset = slave->sii.boot_rx_mailbox_offset;
+        mailbox_size = slave->sii.boot_rx_mailbox_size;
+    }
+
+    if (unlikely(total_size > mailbox_size)) {
         EC_ERR("Data size does not fit in mailbox!\n");
         return NULL;
     }
 
     if (ec_datagram_fpwr(datagram, slave->station_address,
-                         slave->sii.rx_mailbox_offset,
-                         slave->sii.rx_mailbox_size))
+                         mailbox_offset, mailbox_size))
         return NULL;
 
     EC_WRITE_U16(datagram->data,     size); // mailbox service data length
@@ -119,9 +128,20 @@ int ec_slave_mbox_prepare_fetch(const ec_slave_t *slave, /**< slave */
                                 ec_datagram_t *datagram /**< datagram */
                                 )
 {
+    uint16_t mailbox_offset, mailbox_size;
+
+    if (slave->current_state != EC_SLAVE_STATE_BOOT) {
+        mailbox_offset = slave->sii.std_tx_mailbox_offset;
+        mailbox_size = slave->sii.std_tx_mailbox_size;
+    } else {
+        mailbox_offset = slave->sii.boot_tx_mailbox_offset;
+        mailbox_size = slave->sii.boot_tx_mailbox_size;
+    }
+
     if (ec_datagram_fprd(datagram, slave->station_address,
-                         slave->sii.tx_mailbox_offset,
-                         slave->sii.tx_mailbox_size)) return -1;
+                         mailbox_offset, mailbox_size))
+        return -1;
+
     return 0;
 }
 
@@ -157,13 +177,22 @@ uint8_t *ec_slave_mbox_fetch(const ec_slave_t *slave, /**< slave */
                              )
 {
     size_t data_size;
+    uint16_t mailbox_offset, mailbox_size;
+
+    if (slave->current_state != EC_SLAVE_STATE_BOOT) {
+        mailbox_offset = slave->sii.std_tx_mailbox_offset;
+        mailbox_size = slave->sii.std_tx_mailbox_size;
+    } else {
+        mailbox_offset = slave->sii.boot_tx_mailbox_offset;
+        mailbox_size = slave->sii.boot_tx_mailbox_size;
+    }
 
     data_size = EC_READ_U16(datagram->data);
 
-    if (data_size > slave->sii.tx_mailbox_size - 6) {
+    if (data_size > mailbox_size - 6) {
         EC_ERR("Corrupt mailbox response received from slave %u!\n",
                slave->ring_position);
-        ec_print_data(datagram->data, slave->sii.tx_mailbox_size);
+        ec_print_data(datagram->data, mailbox_size);
         return NULL;
     }
 
@@ -172,15 +201,16 @@ uint8_t *ec_slave_mbox_fetch(const ec_slave_t *slave, /**< slave */
 
     if (*type == 0x00) {
         const ec_code_msg_t *mbox_msg;
-	uint16_t code = EC_READ_U16(datagram->data + 8);
+        uint16_t code = EC_READ_U16(datagram->data + 8);
 
         EC_ERR("Mailbox error response received from slave %u - ",
-               slave->ring_position);
+                slave->ring_position);
 
-	for (mbox_msg = mbox_error_messages; mbox_msg->code; mbox_msg++) {
-            if (mbox_msg->code != code) continue;
+        for (mbox_msg = mbox_error_messages; mbox_msg->code; mbox_msg++) {
+            if (mbox_msg->code != code)
+                continue;
             printk("Code 0x%04X: \"%s\".\n",
-                   mbox_msg->code, mbox_msg->message);
+                    mbox_msg->code, mbox_msg->message);
             break;
         }
 
