@@ -39,6 +39,7 @@
 #endif
 
 #include "fsm_master.h"
+#include "fsm_foe.h"
 
 /*****************************************************************************/
 
@@ -52,6 +53,7 @@ void ec_fsm_master_state_scan_slave(ec_fsm_master_t *);
 void ec_fsm_master_state_write_sii(ec_fsm_master_t *);
 void ec_fsm_master_state_sdo_dictionary(ec_fsm_master_t *);
 void ec_fsm_master_state_sdo_request(ec_fsm_master_t *);
+void ec_fsm_master_state_foe_request(ec_fsm_master_t *);
 
 /*****************************************************************************/
 
@@ -73,6 +75,7 @@ void ec_fsm_master_init(
 
     // init sub-state-machines
     ec_fsm_coe_init(&fsm->fsm_coe, fsm->datagram);
+    ec_fsm_foe_init(&fsm->fsm_foe, fsm->datagram);
     ec_fsm_pdo_init(&fsm->fsm_pdo, &fsm->fsm_coe);
     ec_fsm_change_init(&fsm->fsm_change, fsm->datagram);
     ec_fsm_slave_config_init(&fsm->fsm_slave_config, fsm->datagram,
@@ -92,6 +95,7 @@ void ec_fsm_master_clear(
 {
     // clear sub-state machines
     ec_fsm_coe_clear(&fsm->fsm_coe);
+    ec_fsm_foe_clear(&fsm->fsm_foe);
     ec_fsm_pdo_clear(&fsm->fsm_pdo);
     ec_fsm_change_clear(&fsm->fsm_change);
     ec_fsm_slave_config_clear(&fsm->fsm_slave_config);
@@ -209,7 +213,7 @@ void ec_fsm_master_state_broadcast(
         } else {
             master->scan_busy = 1;
             up(&master->scan_sem);
-            
+
             // topology change when scan is allowed:
             // clear all slaves and scan the bus
             fsm->topology_change_pending = 0;
@@ -278,7 +282,7 @@ void ec_fsm_master_state_broadcast(
 /*****************************************************************************/
 
 /** Check for pending SII write requests and process one.
- * 
+ *
  * \return non-zero, if an SII write request is processed.
  */
 int ec_fsm_master_action_process_sii(
@@ -318,7 +322,7 @@ int ec_fsm_master_action_process_sii(
 /*****************************************************************************/
 
 /** Check for pending SDO requests and process one.
- * 
+ *
  * \return non-zero, if an SDO request is processed.
  */
 int ec_fsm_master_action_process_sdo(
@@ -367,7 +371,7 @@ int ec_fsm_master_action_process_sdo(
             }
         }
     }
-    
+
     // search the first external request to be processed
     while (1) {
         if (list_empty(&master->slave_sdo_requests))
@@ -400,6 +404,50 @@ int ec_fsm_master_action_process_sdo(
         fsm->state = ec_fsm_master_state_sdo_request;
         ec_fsm_coe_transfer(&fsm->fsm_coe, slave, &request->req);
         ec_fsm_coe_exec(&fsm->fsm_coe); // execute immediately
+        return 1;
+    }
+
+    return 0;
+}
+
+/*****************************************************************************/
+
+/** Check for pending FoE requests and process one.
+ *
+ * \return non-zero, if an FoE request is processed.
+ */
+int ec_fsm_master_action_process_foe(
+        ec_fsm_master_t *fsm /**< Master state machine. */
+        )
+{
+    ec_master_t *master = fsm->master;
+    ec_slave_t *slave;
+    ec_master_foe_request_t *request;
+
+    // search the first request to be processed
+    while (1) {
+        if (list_empty(&master->foe_requests))
+            break;
+
+        // get first request
+        request = list_entry(master->foe_requests.next,
+                ec_master_foe_request_t, list);
+        list_del_init(&request->list); // dequeue
+        request->req.state = EC_REQUEST_BUSY;
+        slave = request->slave;
+
+        EC_DBG("---- Master read command from queue ----\n");
+        // found pending FOE write operation. execute it!
+        if (master->debug_level)
+            EC_DBG("Writing FOE data to slave %u...\n",
+                    request->slave->ring_position);
+
+        fsm->foe_request = &request->req;
+        fsm->slave = slave;
+        fsm->state = ec_fsm_master_state_foe_request;
+        ec_fsm_foe_transfer(&fsm->fsm_foe, slave, &request->req);
+        //(&fsm->fsm_foe, request->slave, request->offset, request->words);
+        ec_fsm_foe_exec(&fsm->fsm_foe);
         return 1;
     }
 
@@ -659,8 +707,9 @@ void ec_fsm_master_state_scan_slave(
         )
 {
     ec_master_t *master = fsm->master;
+#ifdef EC_EOE
     ec_slave_t *slave = fsm->slave;
-
+#endif
     if (ec_fsm_slave_scan_exec(&fsm->fsm_slave_scan))
         return;
 
@@ -778,13 +827,47 @@ void ec_fsm_master_state_write_sii(
         slave->sii.alias = EC_READ_U16(request->words + 4);
     }
     // TODO: Evaluate other SII contents!
-    
+
     request->state = EC_REQUEST_SUCCESS;
     wake_up(&master->sii_queue);
 
     // check for another SII write request
     if (ec_fsm_master_action_process_sii(fsm))
         return; // processing another request
+
+    ec_fsm_master_restart(fsm);
+}
+
+/*****************************************************************************/
+
+/** Master state: WRITE FOE.
+ */
+void ec_fsm_master_state_foe_request(
+		ec_fsm_master_t *fsm /**< Master state machine. */
+        )
+{
+    ec_master_t *master = fsm->master;
+    ec_foe_request_t *request = fsm->foe_request;
+    ec_slave_t *slave = fsm->slave;
+
+    if (ec_fsm_foe_exec(&fsm->fsm_foe)) return;
+
+    if (!ec_fsm_foe_success(&fsm->fsm_foe)) {
+        EC_ERR("Failed to handle FOE request to slave %u.\n",
+                slave->ring_position);
+        request->state = EC_REQUEST_FAILURE;
+        wake_up(&master->foe_queue);
+        ec_fsm_master_restart(fsm);
+        return;
+    }
+
+    // finished writing FOE
+    if (master->debug_level)
+        EC_DBG("Finished writing %u words of FOE data to slave %u.\n",
+                request->data_size, slave->ring_position);
+
+    request->state = EC_REQUEST_SUCCESS;
+    wake_up(&master->foe_queue);
 
     ec_fsm_master_restart(fsm);
 }
@@ -848,7 +931,7 @@ void ec_fsm_master_state_sdo_request(
         return;
     }
 
-    // SDO request finished 
+    // SDO request finished
     request->state = EC_REQUEST_SUCCESS;
     wake_up(&master->sdo_queue);
 

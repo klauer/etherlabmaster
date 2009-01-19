@@ -69,6 +69,8 @@
 #define EC_IOCTL_CONFIG_PDO           EC_IOWR(0x11, ec_ioctl_config_pdo_t)
 #define EC_IOCTL_CONFIG_PDO_ENTRY     EC_IOWR(0x12, ec_ioctl_config_pdo_entry_t)
 #define EC_IOCTL_CONFIG_SDO           EC_IOWR(0x13, ec_ioctl_config_sdo_t)
+#define EC_IOCTL_SLAVE_FOE_READ       EC_IOWR(0x14, ec_ioctl_slave_foe_t)
+#define EC_IOCTL_SLAVE_FOE_WRITE       EC_IOW(0x15, ec_ioctl_slave_foe_t)
 
 #define EC_IOCTL_STRING_SIZE 64
 
@@ -339,6 +341,21 @@ typedef struct {
     uint32_t size;
     uint8_t data[4];
 } ec_ioctl_config_sdo_t;
+
+/*****************************************************************************/
+
+typedef struct {
+    // inputs
+    uint16_t slave_position;
+    uint16_t offset;
+    uint32_t buffer_size;
+    uint8_t *buffer;
+
+    // outputs
+    uint32_t data_size;
+    uint32_t abort_code;
+    char file_name[32];
+} ec_ioctl_slave_foe_t;
 
 /*****************************************************************************/
 
