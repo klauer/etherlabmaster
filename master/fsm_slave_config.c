@@ -373,6 +373,10 @@ void ec_fsm_slave_config_enter_mbox_sync(
         ec_sync_page(&sync, 0, slave->sii.boot_rx_mailbox_size,
                 EC_DIR_INVALID, // use default direction
                 datagram->data);
+        slave->configured_rx_mailbox_offset =
+            slave->sii.boot_rx_mailbox_offset;
+        slave->configured_rx_mailbox_size =
+            slave->sii.boot_rx_mailbox_size;
 
         ec_sync_init(&sync, slave);
         sync.physical_start_address = slave->sii.boot_tx_mailbox_offset;
@@ -381,6 +385,11 @@ void ec_fsm_slave_config_enter_mbox_sync(
         ec_sync_page(&sync, 1, slave->sii.boot_tx_mailbox_size,
                 EC_DIR_INVALID, // use default direction
                 datagram->data + EC_SYNC_PAGE_SIZE);
+        slave->configured_tx_mailbox_offset =
+            slave->sii.boot_tx_mailbox_offset;
+        slave->configured_tx_mailbox_size =
+            slave->sii.boot_tx_mailbox_size;
+
     } else if (slave->sii.sync_count >= 2) { // mailbox configuration provided
         ec_datagram_fpwr(datagram, slave->station_address, 0x0800,
                 EC_SYNC_PAGE_SIZE * slave->sii.sync_count);
@@ -393,6 +402,15 @@ void ec_fsm_slave_config_enter_mbox_sync(
                     EC_DIR_INVALID, // use default direction
                     datagram->data + EC_SYNC_PAGE_SIZE * i);
         }
+
+        slave->configured_rx_mailbox_offset =
+            slave->sii.syncs[0].physical_start_address;
+        slave->configured_rx_mailbox_size =
+            slave->sii.syncs[0].default_length;
+        slave->configured_tx_mailbox_offset =
+            slave->sii.syncs[1].physical_start_address;
+        slave->configured_tx_mailbox_size =
+            slave->sii.syncs[1].default_length;
     } else { // no mailbox sync manager configurations provided
         ec_sync_t sync;
 
@@ -412,6 +430,10 @@ void ec_fsm_slave_config_enter_mbox_sync(
         ec_sync_page(&sync, 0, slave->sii.std_rx_mailbox_size,
                 EC_DIR_INVALID, // use default direction
                 datagram->data);
+        slave->configured_rx_mailbox_offset =
+            slave->sii.std_rx_mailbox_offset;
+        slave->configured_rx_mailbox_size =
+            slave->sii.std_rx_mailbox_size;
 
         ec_sync_init(&sync, slave);
         sync.physical_start_address = slave->sii.std_tx_mailbox_offset;
@@ -420,6 +442,10 @@ void ec_fsm_slave_config_enter_mbox_sync(
         ec_sync_page(&sync, 1, slave->sii.std_tx_mailbox_size,
                 EC_DIR_INVALID, // use default direction
                 datagram->data + EC_SYNC_PAGE_SIZE);
+        slave->configured_tx_mailbox_offset =
+            slave->sii.boot_tx_mailbox_offset;
+        slave->configured_tx_mailbox_size =
+            slave->sii.boot_tx_mailbox_size;
     }
 
     fsm->retries = EC_FSM_RETRIES;
