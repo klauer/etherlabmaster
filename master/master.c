@@ -888,7 +888,9 @@ schedule:
             schedule_timeout(1);
         }
         else {
-            schedule();
+            //schedule();
+            set_current_state(TASK_INTERRUPTIBLE);
+            schedule_timeout(1);
         }
     }
     
@@ -933,7 +935,8 @@ schedule:
             schedule_timeout(1);
         }
         else {
-            schedule();
+            set_current_state(TASK_INTERRUPTIBLE);
+            schedule_timeout(1);
         }
     }
     
