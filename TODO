@@ -1,0 +1,88 @@
+-------------------------------------------------------------------------------
+
+EtherCAT master TODO
+
+$Id$
+
+vim700: spelllang=en spell
+
+-------------------------------------------------------------------------------
+
+Version 1.5.0:
+
+* Distributed clocks:
+    - Check 32/64 bit operations.
+    - Use vendor correction factors when calculating transmission delays.
+    - Skip setting system time offset when application detached.
+    - How to use the SYNC1 shift time?
+    - Do not output graph, if topology calculation failed.
+    - Set the "Cyclic Generation Start Time" based on the slave's
+      "System Time" register instead of using the application time.
+    - Check if register 0x0980 is working, to avoid clearing it when
+      configuring.
+    - Create an interface to query the System Time Difference registers.
+* Remove byte-swapping functions from user space.
+* EoE:
+    - Only execute one EoE handler per cycle.
+    - Mailbox protocol handlers.
+    - Mailbox state machine using toggle bits.
+* Implement 'ethercat foe_read --output-file ...'.
+* Use ec_datagram_zero() where possible.
+* Fix arguments of reg_read.
+* Sign/Abs type for reg_ commands?
+* Number layout for reg_read.
+* Show Record / Array / List type of SDOs.
+* Limit bandwidth of state machine datagram.
+* Read alias from register 0x0012 instead of SII.
+* Finish library implementation.
+* Rescan command.
+* Override sync manager size?
+* Remove ecrt_domain_state()?
+* Check force_config flag before error.
+* Remove allow_scanning flag.
+* Check for ioctl() interface version.
+* Improve application-triggered SDO transfers by moving the state machine into
+  the SDO handlers.
+* Move device driver files in subdirectories.
+* Document ec_fsm_foe members.
+* Test KBUILD_EXTRA_SYMBOLS.
+* Remove default buffer size in SDO upload.
+* Check for Enable SDO Complete Access flag.
+* Implement CompleteAccess for command-line tool.
+* Implement CompleteAccess for SDO uploads.
+
+Future issues:
+
+* Segmented SDO downloads.
+* External memory for SDO transfers.
+* C++ implementation of the library.
+* Bus simulator interface.
+* Move master threads, slave handlers and state machines into a user
+  space daemon.
+* Allow master requesting when in ORPHANED phase
+* Mailbox gateway.
+* Separate CoE debugging.
+* Evaluate EEPROM contents after writing.
+* Optimize alignment of process data.
+* Redundancy with 2 network adapters.
+* Interface/buffers for asynchronous domain IO.
+* Make scanning and configuration run parallel (each).
+* ethercat tool:
+    - Data type abbreviations.
+    - Add a -n (numeric) switch.
+	- Check for unwanted options.
+* Simplify master fsm by introducing a common request state to handle external
+  requests (replace write_sii, sdo_request, etc).
+
+Smaller issues:
+
+* Read out CRC counters.
+* Configure slave ports to automatically open on link detection.
+* Fix datagram errors on application loading/unloading.
+
+Less important issues:
+
+* Allow VLAN tagging.
+* Determine number of frames, the NIC can handle.
+
+-------------------------------------------------------------------------------
