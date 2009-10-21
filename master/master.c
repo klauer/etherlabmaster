@@ -365,6 +365,69 @@ void ec_master_clear_slaves(ec_master_t *master)
 
     master->dc_ref_clock = NULL;
 
+    // external requests are obsolete, so we wake pending waiters and remove
+    // them from the list
+    //
+	// SII requests
+	while (1) {
+		ec_sii_write_request_t *request;
+		if (list_empty(&master->sii_requests))
+			break;
+		// get first request
+        request = list_entry(master->sii_requests.next,
+                ec_sii_write_request_t, list);
+		list_del_init(&request->list); // dequeue
+		EC_INFO("Discarding SII request, slave %u does not exist anymore.\n",
+				request->slave->ring_position);
+		request->state = EC_INT_REQUEST_FAILURE;
+		wake_up(&master->sii_queue);
+	}
+
+	// Register requests
+	while (1) {
+	    ec_reg_request_t *request;
+		if (list_empty(&master->reg_requests))
+			break;
+		// get first request
+		request = list_entry(master->reg_requests.next,
+				ec_reg_request_t, list);
+		list_del_init(&request->list); // dequeue
+		EC_INFO("Discarding Reg request, slave %u does not exist anymore.\n",
+				request->slave->ring_position);
+		request->state = EC_INT_REQUEST_FAILURE;
+		wake_up(&master->reg_queue);
+	}
+
+	// SDO requests
+	while (1) {
+		ec_master_sdo_request_t *request;
+		if (list_empty(&master->slave_sdo_requests))
+			break;
+		// get first request
+		request = list_entry(master->slave_sdo_requests.next,
+				ec_master_sdo_request_t, list);
+		list_del_init(&request->list); // dequeue
+		EC_INFO("Discarding SDO request, slave %u does not exist anymore.\n",
+				request->slave->ring_position);
+		request->req.state = EC_INT_REQUEST_FAILURE;
+		wake_up(&master->sdo_queue);
+	}
+
+	// FoE requests
+	while (1) {
+		ec_master_foe_request_t *request;
+		if (list_empty(&master->foe_requests))
+			break;
+		// get first request
+		request = list_entry(master->foe_requests.next,
+				ec_master_foe_request_t, list);
+		list_del_init(&request->list); // dequeue
+		EC_INFO("Discarding FOE request, slave %u does not exist anymore.\n",
+				request->slave->ring_position);
+		request->req.state = EC_INT_REQUEST_FAILURE;
+		wake_up(&master->foe_queue);
+	}
+
     for (slave = master->slaves;
             slave < master->slaves + master->slave_count;
             slave++) {
@@ -636,7 +699,7 @@ void ec_master_queue_datagram(
         if (queued_datagram == datagram) {
             datagram->skip_count++;
             if (master->debug_level)
-                EC_DBG("skipping datagram %x.\n", (unsigned int) datagram);
+                EC_DBG("skipping datagram %p.\n", datagram);
             datagram->state = EC_DATAGRAM_QUEUED;
             return;
         }
@@ -750,7 +813,7 @@ void ec_master_send_datagrams(ec_master_t *master /**< EtherCAT master */)
             EC_WRITE_U8(cur_data++, 0x00);
 
         if (unlikely(master->debug_level > 1))
-            EC_DBG("frame size: %u\n", cur_data - frame_data);
+            EC_DBG("frame size: %zu\n", cur_data - frame_data);
 
         // send frame
         ec_device_send(&master->main_device, cur_data - frame_data);
@@ -804,7 +867,7 @@ void ec_master_receive_datagrams(ec_master_t *master, /**< EtherCAT master */
 
     if (unlikely(size < EC_FRAME_HEADER_SIZE)) {
         if (master->debug_level) {
-            EC_DBG("Corrupted frame received (size %u < %u byte):\n",
+            EC_DBG("Corrupted frame received (size %zu < %u byte):\n",
                     size, EC_FRAME_HEADER_SIZE);
             ec_print_data(frame_data, size);
         }
@@ -821,8 +884,8 @@ void ec_master_receive_datagrams(ec_master_t *master, /**< EtherCAT master */
 
     if (unlikely(frame_size > size)) {
         if (master->debug_level) {
-            EC_DBG("Corrupted frame received (invalid frame size %u for "
-                    "received size %u):\n", frame_size, size);
+            EC_DBG("Corrupted frame received (invalid frame size %zu for "
+                    "received size %zu):\n", frame_size, size);
             ec_print_data(frame_data, size);
         }
         master->stats.corrupted++;
@@ -842,7 +905,7 @@ void ec_master_receive_datagrams(ec_master_t *master, /**< EtherCAT master */
         if (unlikely(cur_data - frame_data
                      + data_size + EC_DATAGRAM_FOOTER_SIZE > size)) {
             if (master->debug_level) {
-                EC_DBG("Corrupted frame received (invalid data size %u):\n",
+                EC_DBG("Corrupted frame received (invalid data size %zu):\n",
                         data_size);
                 ec_print_data(frame_data, size);
             }
@@ -1552,7 +1615,7 @@ ec_domain_t *ecrt_master_create_domain_err(
     unsigned int index;
 
     if (master->debug_level)
-        EC_DBG("ecrt_master_create_domain(master = 0x%x)\n", (u32) master);
+        EC_DBG("ecrt_master_create_domain(master = 0x%p)\n", master);
 
     if (!(domain = (ec_domain_t *) kmalloc(sizeof(ec_domain_t), GFP_KERNEL))) {
         EC_ERR("Error allocating domain memory!\n");
@@ -1598,7 +1661,7 @@ int ecrt_master_activate(ec_master_t *master)
     int ret;
 
     if (master->debug_level)
-        EC_DBG("ecrt_master_activate(master = 0x%x)\n", (u32) master);
+        EC_DBG("ecrt_master_activate(master = 0x%p)\n", master);
 
     if (master->active) {
         EC_WARN("%s: Master already active!\n", __func__);
@@ -1613,7 +1676,7 @@ int ecrt_master_activate(ec_master_t *master)
         ret = ec_domain_finish(domain, domain_offset);
         if (ret < 0) {
             up(&master->master_sem);
-            EC_ERR("Failed to finish domain 0x%08X!\n", (u32) domain);
+            EC_ERR("Failed to finish domain 0x%p!\n", domain);
             return ret;
         }
         domain_offset += domain->data_size;
@@ -1633,7 +1696,7 @@ int ecrt_master_activate(ec_master_t *master)
     ec_master_thread_stop(master);
 
     if (master->debug_level)
-        EC_DBG("FSM datagram is %x.\n", (unsigned int) &master->fsm_datagram);
+        EC_DBG("FSM datagram is %p.\n", &master->fsm_datagram);
 
     master->injection_seq_fsm = 0;
     master->injection_seq_rt = 0;
@@ -1790,8 +1853,8 @@ void ecrt_master_receive(ec_master_t *master)
                 time_us = (unsigned int) ((master->main_device.jiffies_poll -
                             datagram->jiffies_sent) * 1000000 / HZ);
 #endif
-                EC_DBG("TIMED OUT datagram %08x, index %02X waited %u us.\n",
-                        (unsigned int) datagram, datagram->index, time_us);
+                EC_DBG("TIMED OUT datagram %p, index %02X waited %u us.\n",
+                        datagram, datagram->index, time_us);
             }
         }
     }
@@ -1827,9 +1890,9 @@ ec_slave_config_t *ecrt_master_slave_config_err(ec_master_t *master,
 
 
     if (master->debug_level)
-        EC_DBG("ecrt_master_slave_config(master = 0x%x, alias = %u, "
+        EC_DBG("ecrt_master_slave_config(master = 0x%p, alias = %u, "
                 "position = %u, vendor_id = 0x%08x, product_code = 0x%08x)\n",
-                (u32) master, alias, position, vendor_id, product_code);
+                master, alias, position, vendor_id, product_code);
 
     list_for_each_entry(sc, &master->configs, list) {
         if (sc->alias == alias && sc->position == position) {
@@ -1890,9 +1953,9 @@ void ecrt_master_callbacks(ec_master_t *master,
         void (*send_cb)(void *), void (*receive_cb)(void *), void *cb_data)
 {
     if (master->debug_level)
-        EC_DBG("ecrt_master_callbacks(master = 0x%x, send_cb = 0x%x, "
-                " receive_cb = 0x%x, cb_data = 0x%x)\n", (u32) master,
-                (u32) send_cb, (u32) receive_cb, (u32) cb_data);
+        EC_DBG("ecrt_master_callbacks(master = 0x%p, send_cb = 0x%p, "
+                " receive_cb = 0x%p, cb_data = 0x%p)\n", master,
+                send_cb, receive_cb, cb_data);
 
     master->app_send_cb = send_cb;
     master->app_receive_cb = receive_cb;
