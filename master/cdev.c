@@ -808,12 +808,12 @@ int ec_cdev_ioctl_slave_sdo_upload(
     if (master->debug_level)
         EC_DBG("Schedule SDO upload request for slave %u\n",request.slave->ring_position);
     // schedule request.
-    list_add_tail(&request.list, &master->slave_sdo_requests);
+    list_add_tail(&request.list, &request.slave->slave_sdo_requests);
 
     up(&master->master_sem);
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->sdo_queue,
+    if (wait_event_interruptible(request.slave->sdo_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
@@ -828,7 +828,7 @@ int ec_cdev_ioctl_slave_sdo_upload(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
 
     if (master->debug_level)
         EC_DBG("Scheduled SDO upload request for slave %u done\n",request.slave->ring_position);
@@ -914,12 +914,12 @@ int ec_cdev_ioctl_slave_sdo_download(
     if (master->debug_level)
         EC_DBG("Schedule SDO download request for slave %u\n",request.slave->ring_position);
     // schedule request.
-    list_add_tail(&request.list, &master->slave_sdo_requests);
+    list_add_tail(&request.list, &request.slave->slave_sdo_requests);
 
     up(&master->master_sem);
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->sdo_queue,
+    if (wait_event_interruptible(request.slave->sdo_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
@@ -934,7 +934,7 @@ int ec_cdev_ioctl_slave_sdo_download(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
 
     if (master->debug_level)
         EC_DBG("Scheduled SDO download request for slave %u done\n",request.slave->ring_position);
@@ -1678,21 +1678,21 @@ int ec_cdev_ioctl_deactivate(
 
 /** Set max. number of databytes in a cycle
  */
-int ec_cdev_ioctl_set_max_cycle_size(
+int ec_cdev_ioctl_set_send_interval(
         ec_master_t *master, /**< EtherCAT master. */
         unsigned long arg, /**< ioctl() argument. */
         ec_cdev_priv_t *priv /**< Private data structure of file handle. */
         )
 {
-    size_t max_cycle_size;
+	size_t send_interval;
 
-    if (copy_from_user(&max_cycle_size, (void __user *) arg, sizeof(max_cycle_size))) {
+	if (copy_from_user(&send_interval, (void __user *) arg, sizeof(send_interval))) {
         return -EFAULT;
     }
 
     if (down_interruptible(&master->master_sem))
         return -EINTR;
-    master->max_queue_size = max_cycle_size;
+	ec_master_set_send_interval(master,send_interval);
     up(&master->master_sem);
 
     return 0;
@@ -3057,7 +3057,7 @@ int ec_cdev_ioctl_slave_foe_read(
     }
 
     // schedule request.
-    list_add_tail(&request.list, &master->foe_requests);
+    list_add_tail(&request.list, &request.slave->foe_requests);
 
     up(&master->master_sem);
 
@@ -3067,7 +3067,7 @@ int ec_cdev_ioctl_slave_foe_read(
     }
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->foe_queue,
+    if (wait_event_interruptible(request.slave->foe_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
@@ -3082,7 +3082,7 @@ int ec_cdev_ioctl_slave_foe_read(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
 
     data.result = request.req.result;
     data.error_code = request.req.error_code;
@@ -3172,12 +3172,12 @@ int ec_cdev_ioctl_slave_foe_write(
     }
 
     // schedule FoE write request.
-    list_add_tail(&request.list, &master->foe_requests);
+    list_add_tail(&request.list, &request.slave->foe_requests);
 
     up(&master->master_sem);
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->foe_queue,
+    if (wait_event_interruptible(request.slave->foe_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
@@ -3192,7 +3192,7 @@ int ec_cdev_ioctl_slave_foe_write(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
 
     data.result = request.req.result;
     data.error_code = request.req.error_code;
@@ -3492,10 +3492,10 @@ long eccdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             return ec_cdev_ioctl_voe_exec(master, arg, priv);
         case EC_IOCTL_VOE_DATA:
             return ec_cdev_ioctl_voe_data(master, arg, priv);
-        case EC_IOCTL_SET_MAX_CYCLE_SIZE:
+		case EC_IOCTL_SET_SEND_INTERVAL:
             if (!(filp->f_mode & FMODE_WRITE))
                 return -EPERM;
-            return ec_cdev_ioctl_set_max_cycle_size(master,arg,priv);
+			return ec_cdev_ioctl_set_send_interval(master,arg,priv);
         default:
             return -ENOTTY;
     }

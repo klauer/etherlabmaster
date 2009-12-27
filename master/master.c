@@ -41,7 +41,7 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/version.h>
-
+#include <linux/hrtimer.h>
 #include "globals.h"
 #include "slave.h"
 #include "slave_config.h"
@@ -53,6 +53,10 @@
 #include "master.h"
 
 /*****************************************************************************/
+
+/** Set to 1 to enable external datagram injection debugging.
+ */
+#define DEBUG_INJECT 0
 
 #ifdef EC_HAVE_CYCLES
 
@@ -154,8 +158,8 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
     INIT_LIST_HEAD(&master->ext_datagram_queue);
     sema_init(&master->ext_queue_sem, 1);
 
-    INIT_LIST_HEAD(&master->sdo_datagram_queue);
-    master->max_queue_size = EC_MAX_DATA_SIZE;
+    INIT_LIST_HEAD(&master->external_datagram_queue);
+	ec_master_set_send_interval(master,1000000 / HZ); // send interval in IDLE phase
 
     INIT_LIST_HEAD(&master->domains);
 
@@ -184,14 +188,8 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
     INIT_LIST_HEAD(&master->sii_requests);
     init_waitqueue_head(&master->sii_queue);
 
-    INIT_LIST_HEAD(&master->slave_sdo_requests);
-    init_waitqueue_head(&master->sdo_queue);
-
     INIT_LIST_HEAD(&master->reg_requests);
     init_waitqueue_head(&master->reg_queue);
-
-    INIT_LIST_HEAD(&master->foe_requests);
-    init_waitqueue_head(&master->foe_queue);
 
     // init devices
     ret = ec_device_init(&master->main_device, master);
@@ -405,39 +403,37 @@ void ec_master_clear_slaves(ec_master_t *master)
 		wake_up(&master->reg_queue);
 	}
 
-	// SDO requests
-	while (1) {
-		ec_master_sdo_request_t *request;
-		if (list_empty(&master->slave_sdo_requests))
-			break;
-		// get first request
-		request = list_entry(master->slave_sdo_requests.next,
-				ec_master_sdo_request_t, list);
-		list_del_init(&request->list); // dequeue
-		EC_INFO("Discarding SDO request, slave %u does not exist anymore.\n",
-				request->slave->ring_position);
-		request->req.state = EC_INT_REQUEST_FAILURE;
-		wake_up(&master->sdo_queue);
-	}
-
-	// FoE requests
-	while (1) {
-		ec_master_foe_request_t *request;
-		if (list_empty(&master->foe_requests))
-			break;
-		// get first request
-		request = list_entry(master->foe_requests.next,
-				ec_master_foe_request_t, list);
-		list_del_init(&request->list); // dequeue
-		EC_INFO("Discarding FOE request, slave %u does not exist anymore.\n",
-				request->slave->ring_position);
-		request->req.state = EC_INT_REQUEST_FAILURE;
-		wake_up(&master->foe_queue);
-	}
-
     for (slave = master->slaves;
             slave < master->slaves + master->slave_count;
             slave++) {
+        // SDO requests
+        while (1) {
+            ec_master_sdo_request_t *request;
+            if (list_empty(&slave->slave_sdo_requests))
+                break;
+            // get first request
+            request = list_entry(slave->slave_sdo_requests.next,
+                    ec_master_sdo_request_t, list);
+            list_del_init(&request->list); // dequeue
+            EC_INFO("Discarding SDO request, slave %u does not exist anymore.\n",
+                    slave->ring_position);
+            request->req.state = EC_INT_REQUEST_FAILURE;
+            wake_up(&slave->sdo_queue);
+        }
+        // FoE requests
+        while (1) {
+            ec_master_foe_request_t *request;
+            if (list_empty(&slave->foe_requests))
+                break;
+            // get first request
+            request = list_entry(slave->foe_requests.next,
+                    ec_master_foe_request_t, list);
+            list_del_init(&request->list); // dequeue
+            EC_INFO("Discarding FOE request, slave %u does not exist anymore.\n",
+                    slave->ring_position);
+            request->req.state = EC_INT_REQUEST_FAILURE;
+            wake_up(&slave->foe_queue);
+        }
         ec_slave_clear(slave);
     }
 
@@ -693,86 +689,118 @@ void ec_master_leave_operation_phase(
 
 /*****************************************************************************/
 
-/** Injects sdo datagrams that fit into the datagram queue
+/** Injects external datagrams that fit into the datagram queue
  */
-void ec_master_inject_sdo_datagrams(
-        ec_master_t *master /**< EtherCAT master */
-        )
+void ec_master_inject_external_datagrams(
+		ec_master_t *master /**< EtherCAT master */
+		)
 {
-    ec_datagram_t *datagram, *n;
-    size_t queue_size = 0;
-    list_for_each_entry(datagram, &master->datagram_queue, queue) {
-        queue_size += datagram->data_size;
-    }
-    list_for_each_entry_safe(datagram, n, &master->sdo_datagram_queue, queue) {
-        queue_size += datagram->data_size;
-        if (queue_size <= master->max_queue_size) {
-            list_del_init(&datagram->queue);
-            if (master->debug_level) {
-                EC_DBG("Injecting SDO datagram %08x size=%u, queue_size=%u\n",(unsigned int)datagram,datagram->data_size,queue_size);
-            }
-#ifdef EC_HAVE_CYCLES
-            datagram->cycles_sent = 0;
+	ec_datagram_t *datagram, *n;
+	size_t queue_size = 0;
+	list_for_each_entry(datagram, &master->datagram_queue, queue) {
+		queue_size += datagram->data_size;
+	}
+	list_for_each_entry_safe(datagram, n, &master->external_datagram_queue, queue) {
+		queue_size += datagram->data_size;
+		if (queue_size <= master->max_queue_size) {
+			list_del_init(&datagram->queue);
+#if DEBUG_INJECT
+			if (master->debug_level) {
+				EC_DBG("Injecting external datagram %08x size=%u, queue_size=%u\n",(unsigned int)datagram,datagram->data_size,queue_size);
+			}
 #endif
-            datagram->jiffies_sent = 0;
-            ec_master_queue_datagram(master, datagram);
-        }
-        else {
-            if (datagram->data_size > master->max_queue_size) {
-                list_del_init(&datagram->queue);
-                datagram->state = EC_DATAGRAM_ERROR;
-                EC_ERR("SDO datagram %08x is too large, size=%u, max_queue_size=%u\n",(unsigned int)datagram,datagram->data_size,master->max_queue_size);
-            }
-            else {
 #ifdef EC_HAVE_CYCLES
-                cycles_t cycles_now = get_cycles();
-                if (cycles_now - datagram->cycles_sent
-                        > sdo_injection_timeout_cycles) {
+			datagram->cycles_sent = 0;
+#endif
+			datagram->jiffies_sent = 0;
+			ec_master_queue_datagram(master, datagram);
+		}
+		else {
+			if (datagram->data_size > master->max_queue_size) {
+				list_del_init(&datagram->queue);
+				datagram->state = EC_DATAGRAM_ERROR;
+				EC_ERR("External datagram %08x is too large, size=%u, max_queue_size=%u\n",(unsigned int)datagram,datagram->data_size,master->max_queue_size);
+			}
+			else {
+#ifdef EC_HAVE_CYCLES
+				cycles_t cycles_now = get_cycles();
+				if (cycles_now - datagram->cycles_sent
+						> sdo_injection_timeout_cycles) {
 #else
-                if (jiffies - datagram->jiffies_sent
-                        > sdo_injection_timeout_jiffies) {
+				if (jiffies - datagram->jiffies_sent
+						> sdo_injection_timeout_jiffies) {
 #endif
-                    unsigned int time_us;
-                    list_del_init(&datagram->queue);
-                    datagram->state = EC_DATAGRAM_ERROR;
+					unsigned int time_us;
+					list_del_init(&datagram->queue);
+					datagram->state = EC_DATAGRAM_ERROR;
 #ifdef EC_HAVE_CYCLES
-                    time_us = (unsigned int) ((cycles_now - datagram->cycles_sent) * 1000LL) / cpu_khz;
+					time_us = (unsigned int) ((cycles_now - datagram->cycles_sent) * 1000LL) / cpu_khz;
 #else
-                    time_us = (unsigned int) ((jiffies - datagram->jiffies_sent) * 1000000 / HZ);
+					time_us = (unsigned int) ((jiffies - datagram->jiffies_sent) * 1000000 / HZ);
 #endif
-                    EC_ERR("Timeout %u us: injecting SDO datagram %08x size=%u, max_queue_size=%u\n",time_us,(unsigned int)datagram,datagram->data_size,master->max_queue_size);
-                }
-                else  {
-                    if (master->debug_level) {
-                        EC_DBG("Deferred injecting of SDO datagram %08x size=%u, queue_size=%u\n",(unsigned int)datagram,datagram->data_size,queue_size);
-                    }
-                }
-            }
-        }
-    }
+					EC_ERR("Timeout %u us: injecting external datagram %08x size=%u, max_queue_size=%u\n",time_us,(unsigned int)datagram,datagram->data_size,master->max_queue_size);
+				}
+				else  {
+#if DEBUG_INJECT
+					if (master->debug_level) {
+						EC_DBG("Deferred injecting of external datagram %08x size=%u, queue_size=%u\n",(unsigned int)datagram,datagram->data_size,queue_size);
+					}
+#endif
+				}
+			}
+		}
+	}
 }
 
 /*****************************************************************************/
 
-/** Places a sdo datagram in the sdo datagram queue.
+/** sets the expected interval between calls to ecrt_master_send
+	and calculates the maximum amount of data to queue
  */
-void ec_master_queue_sdo_datagram(
+void ec_master_set_send_interval(
+		ec_master_t *master, /**< EtherCAT master */
+		size_t send_interval /**< send interval */
+		)
+{
+	master->send_interval = send_interval;
+	master->max_queue_size = (send_interval * 1000) / EC_BYTE_TRANSMITION_TIME;
+	master->max_queue_size -= master->max_queue_size / 10;
+}
+
+
+/*****************************************************************************/
+
+/** Places an external datagram in the sdo datagram queue.
+ */
+void ec_master_queue_external_datagram(
         ec_master_t *master, /**< EtherCAT master */
         ec_datagram_t *datagram /**< datagram */
         )
 {
-    if (master->debug_level) {
-        EC_DBG("Requesting SDO datagram %08x size=%u\n",(unsigned int)datagram,datagram->data_size);
-    }
-    datagram->state = EC_DATAGRAM_QUEUED;
-#ifdef EC_HAVE_CYCLES
-    datagram->cycles_sent = get_cycles();
-#endif
-    datagram->jiffies_sent = jiffies;
+	ec_datagram_t *queued_datagram;
 
     down(&master->io_sem);
-    list_add_tail(&datagram->queue, &master->sdo_datagram_queue);
-    up(&master->io_sem);
+	// check, if the datagram is already queued
+	list_for_each_entry(queued_datagram, &master->external_datagram_queue, queue) {
+		if (queued_datagram == datagram) {
+			datagram->state = EC_DATAGRAM_QUEUED;
+			return;
+		}
+	}
+#if DEBUG_INJECT
+	if (master->debug_level) {
+		EC_DBG("Requesting external datagram %08x size=%u\n",(unsigned int)datagram,datagram->data_size);
+	}
+#endif
+	list_add_tail(&datagram->queue, &master->external_datagram_queue);
+	datagram->state = EC_DATAGRAM_QUEUED;
+#ifdef EC_HAVE_CYCLES
+	datagram->cycles_sent = get_cycles();
+#endif
+	datagram->jiffies_sent = jiffies;
+
+	master->fsm.idle = 0;
+	up(&master->io_sem);
 }
 
 /*****************************************************************************/
@@ -821,12 +849,11 @@ void ec_master_queue_datagram_ext(
 
 /** Sends the datagrams in the queue.
  *
- * \return 0 in case of success, else < 0
  */
 void ec_master_send_datagrams(ec_master_t *master /**< EtherCAT master */)
 {
     ec_datagram_t *datagram, *next;
-    size_t datagram_size;
+	size_t datagram_size;
     uint8_t *frame_data, *cur_data;
     void *follows_word;
 #ifdef EC_HAVE_CYCLES
@@ -1087,6 +1114,69 @@ void ec_master_output_stats(ec_master_t *master /**< EtherCAT master */)
     }
 }
 
+
+/*****************************************************************************/
+/*
+ * Sleep related functions:
+ */
+static enum hrtimer_restart ec_master_nanosleep_wakeup(struct hrtimer *timer)
+{
+	struct hrtimer_sleeper *t =
+		container_of(timer, struct hrtimer_sleeper, timer);
+	struct task_struct *task = t->task;
+
+	t->task = NULL;
+	if (task)
+		wake_up_process(task);
+
+	return HRTIMER_NORESTART;
+}
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
+/* compatibility with new hrtimer interface */
+static inline ktime_t hrtimer_get_expires(const struct hrtimer *timer)
+{
+	return timer->expires;
+}
+
+static inline void hrtimer_set_expires(struct hrtimer *timer, ktime_t time)
+{
+	timer->expires = time;
+}
+#endif
+
+
+void ec_master_nanosleep(const unsigned long nsecs)
+{
+	struct hrtimer_sleeper t;
+	enum hrtimer_mode mode = HRTIMER_MODE_REL;
+	hrtimer_init(&t.timer, CLOCK_MONOTONIC,mode);
+	t.timer.function = ec_master_nanosleep_wakeup;
+	t.task = current;
+#ifdef CONFIG_HIGH_RES_TIMERS
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 24)
+	t.timer.cb_mode = HRTIMER_CB_IRQSAFE_NO_RESTART;
+#elif LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 26)
+	t.timer.cb_mode = HRTIMER_CB_IRQSAFE_NO_SOFTIRQ;
+#elif LINUX_VERSION_CODE <= KERNEL_VERSION(2, 6, 28)
+	t.timer.cb_mode = HRTIMER_CB_IRQSAFE_UNLOCKED;
+#endif
+#endif
+	hrtimer_set_expires(&t.timer, ktime_set(0,nsecs));
+	do {
+		set_current_state(TASK_INTERRUPTIBLE);
+		hrtimer_start(&t.timer, hrtimer_get_expires(&t.timer), mode);
+
+		if (likely(t.task))
+			schedule();
+
+		hrtimer_cancel(&t.timer);
+		mode = HRTIMER_MODE_ABS;
+
+	} while (t.task && !signal_pending(current));
+}
+
+
 /*****************************************************************************/
 
 /** Master kernel thread function for IDLE phase.
@@ -1096,8 +1186,10 @@ static int ec_master_idle_thread(void *priv_data)
     ec_master_t *master = (ec_master_t *) priv_data;
     ec_slave_t *slave = NULL;
     int fsm_exec;
-    if (master->debug_level)
-        EC_DBG("Idle thread running.\n");
+	size_t sent_bytes;
+	ec_master_set_send_interval(master,1000000 / HZ); // send interval in IDLE phase
+	if (master->debug_level)
+		EC_DBG("Idle thread running with send interval = %d us, max data size=%d\n",master->send_interval,master->max_queue_size);
 
     while (!kthread_should_stop()) {
         ec_datagram_output_stats(&master->fsm_datagram);
@@ -1124,17 +1216,15 @@ static int ec_master_idle_thread(void *priv_data)
         if (fsm_exec) {
             ec_master_queue_datagram(master, &master->fsm_datagram);
         }
-        ec_master_inject_sdo_datagrams(master);
+        ec_master_inject_external_datagrams(master);
         ecrt_master_send(master);
+		sent_bytes = master->main_device.tx_skb[master->main_device.tx_ring_index]->len;
         up(&master->io_sem);
 
-        if (ec_fsm_master_idle(&master->fsm)) {
-            set_current_state(TASK_INTERRUPTIBLE);
-            schedule_timeout(1);
-        }
-        else {
-            schedule();
-        }
+		if (ec_fsm_master_idle(&master->fsm))
+			ec_master_nanosleep(master->send_interval*1000);
+		else
+			ec_master_nanosleep(sent_bytes*EC_BYTE_TRANSMITION_TIME);
     }
     
     if (master->debug_level)
@@ -1152,7 +1242,7 @@ static int ec_master_operation_thread(void *priv_data)
     ec_slave_t *slave = NULL;
     int fsm_exec;
     if (master->debug_level)
-        EC_DBG("Operation thread running.\n");
+		EC_DBG("Operation thread running with fsm interval = %d us, max data size=%d\n",master->send_interval,master->max_queue_size);
 
     while (!kthread_should_stop()) {
         ec_datagram_output_stats(&master->fsm_datagram);
@@ -1176,14 +1266,9 @@ static int ec_master_operation_thread(void *priv_data)
             if (fsm_exec)
                 master->injection_seq_fsm++;
         }
-        if (ec_fsm_master_idle(&master->fsm)) {
-            set_current_state(TASK_INTERRUPTIBLE);
-            schedule_timeout(1);
-        }
-        else {
-            schedule();
-        }
-    }
+		// the op thread should not work faster than the sending RT thread
+		ec_master_nanosleep(master->send_interval*1000);
+	}
     
     if (master->debug_level)
         EC_DBG("Master OP thread exiting...\n");
@@ -1903,7 +1988,7 @@ void ecrt_master_send(ec_master_t *master)
         ec_master_queue_datagram(master, &master->fsm_datagram);
         master->injection_seq_rt = master->injection_seq_fsm;
     }
-    ec_master_inject_sdo_datagrams(master);
+    ec_master_inject_external_datagrams(master);
 
     if (unlikely(!master->main_device.link_state)) {
         // link is down, no datagram can be sent
@@ -1918,7 +2003,7 @@ void ecrt_master_send(ec_master_t *master)
     }
 
     // send frames
-    ec_master_send_datagrams(master);
+	ec_master_send_datagrams(master);
 }
 
 /*****************************************************************************/
