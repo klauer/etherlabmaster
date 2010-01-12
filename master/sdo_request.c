@@ -56,6 +56,7 @@ void ec_sdo_request_init(
         ec_sdo_request_t *req /**< SDO request. */
         )
 {
+    req->complete_access = 0;
     req->data = NULL;
     req->mem_size = 0;
     req->data_size = 0;
@@ -88,6 +89,7 @@ int ec_sdo_request_copy(
         const ec_sdo_request_t *other /**< Other SDO request to copy from. */
         )
 {
+    req->complete_access = other->complete_access;
     req->index = other->index;
     req->subindex = other->subindex;
     return ec_sdo_request_copy_data(req, other->data, other->data_size);
@@ -143,7 +145,7 @@ int ec_sdo_request_alloc(
     ec_sdo_request_clear_data(req);
 
     if (!(req->data = (uint8_t *) kmalloc(size, GFP_KERNEL))) {
-        EC_ERR("Failed to allocate %u bytes of SDO memory.\n", size);
+        EC_ERR("Failed to allocate %zu bytes of SDO memory.\n", size);
         return -ENOMEM;
     }
 

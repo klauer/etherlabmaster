@@ -43,6 +43,10 @@ if ENABLE_USERLIB
 SUBDIRS += lib
 endif
 
+if ENABLE_TTY
+SUBDIRS += tty
+endif
+
 # userspace example depends on lib/
 SUBDIRS += examples
 
@@ -54,7 +58,8 @@ DIST_SUBDIRS = \
     m4 \
     master \
     script \
-    tool
+    tool \
+	tty
 
 noinst_HEADERS = \
 	globals.h
@@ -75,20 +80,22 @@ modules:
 modules_install:
 	$(MAKE) -C master modules_install
 	$(MAKE) -C devices modules_install
+if ENABLE_TTY
+	$(MAKE) -C tty modules_install
+endif
 
 clean-local:
 	$(MAKE) -C "$(LINUX_SOURCE_DIR)" M="@abs_srcdir@" clean
 	@rm -f Modules.symvers
 
 mydist:
-	svn2cl $(srcdir)
-	@SVNREV=`svnversion $(srcdir)` && \
-	  $(MAKE) dist-bzip2 \
-	  distdir=$(PACKAGE)-$(VERSION)-r$${SVNREV}
+	hg log --style=changelog $(srcdir) > ChangeLog
+	@REV=`hg id -i $(srcdir)` && \
+		$(MAKE) dist-bzip2 distdir=$(PACKAGE)-$(VERSION)-$${REV}
 
 dist-hook:
-	if which svnversion >/dev/null 2>&1; then \
-		svnversion $(srcdir) 2>/dev/null >$(distdir)/svnrevision; \
+	if which hg >/dev/null 2>&1; then \
+		hg id -i $(srcdir) 2>/dev/null >$(distdir)/revision; \
 	fi
 
 mrproper: clean cleandoc

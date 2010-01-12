@@ -58,7 +58,7 @@ void ec_fsm_master_state_write_sii(ec_fsm_master_t *);
 void ec_fsm_master_state_sdo_dictionary(ec_fsm_master_t *);
 void ec_fsm_master_state_sdo_request(ec_fsm_master_t *);
 void ec_fsm_master_state_reg_request(ec_fsm_master_t *);
-void ec_fsm_master_state_foe_request(ec_fsm_master_t *);
+
 
 /*****************************************************************************/
 
@@ -81,7 +81,6 @@ void ec_fsm_master_init(
 
     // init sub-state-machines
     ec_fsm_coe_init(&fsm->fsm_coe, fsm->datagram);
-    ec_fsm_foe_init(&fsm->fsm_foe, fsm->datagram);
     ec_fsm_pdo_init(&fsm->fsm_pdo, &fsm->fsm_coe);
     ec_fsm_change_init(&fsm->fsm_change, fsm->datagram);
     ec_fsm_slave_config_init(&fsm->fsm_slave_config, fsm->datagram,
@@ -101,7 +100,6 @@ void ec_fsm_master_clear(
 {
     // clear sub-state machines
     ec_fsm_coe_clear(&fsm->fsm_coe);
-    ec_fsm_foe_clear(&fsm->fsm_foe);
     ec_fsm_pdo_clear(&fsm->fsm_pdo);
     ec_fsm_change_clear(&fsm->fsm_change);
     ec_fsm_slave_config_clear(&fsm->fsm_slave_config);
@@ -115,18 +113,21 @@ void ec_fsm_master_clear(
  *
  * If the state machine's datagram is not sent or received yet, the execution
  * of the state machine is delayed to the next cycle.
+ *
+ * \return true, if the state machine was executed
  */
-void ec_fsm_master_exec(
+int ec_fsm_master_exec(
         ec_fsm_master_t *fsm /**< Master state machine. */
         )
 {
     if (fsm->datagram->state == EC_DATAGRAM_SENT
         || fsm->datagram->state == EC_DATAGRAM_QUEUED) {
         // datagram was not sent or received yet.
-        return;
+        return 0;
     }
 
     fsm->state(fsm);
+    return 1;
 }
 
 /*****************************************************************************/
@@ -344,7 +345,7 @@ int ec_fsm_master_action_process_sii(
 /*****************************************************************************/
 
 /** Check for pending register requests and process one.
- * 
+ *
  * \return non-zero, if a register request is processed.
  */
 int ec_fsm_master_action_process_register(
@@ -366,13 +367,13 @@ int ec_fsm_master_action_process_register(
         // found pending request; process it!
         if (master->debug_level)
             EC_DBG("Processing register request for slave %u, "
-                    "offset 0x%04x, length %u...\n",
+                    "offset 0x%04x, length %zu...\n",
                     request->slave->ring_position,
                     request->offset, request->length);
 
         if (request->length > fsm->datagram->mem_size) {
-            EC_ERR("Request length (%u) exceeds maximum "
-                    "datagram size (%u)!\n", request->length,
+            EC_ERR("Request length (%zu) exceeds maximum "
+                    "datagram size (%zu)!\n", request->length,
                     fsm->datagram->mem_size);
             request->state = EC_INT_REQUEST_FAILURE;
             wake_up(&master->reg_queue);
@@ -411,7 +412,6 @@ int ec_fsm_master_action_process_sdo(
     ec_master_t *master = fsm->master;
     ec_slave_t *slave;
     ec_sdo_request_t *req;
-    ec_master_sdo_request_t *request;
 
     // search for internal requests to be processed
     for (slave = master->slaves;
@@ -425,7 +425,7 @@ int ec_fsm_master_action_process_sdo(
                 if (ec_sdo_request_timed_out(req)) {
                     req->state = EC_INT_REQUEST_FAILURE;
                     if (master->debug_level)
-                        EC_DBG("SDO request for slave %u timed out...\n",
+                        EC_DBG("Internal SDO request for slave %u timed out...\n",
                                 slave->ring_position);
                     continue;
                 }
@@ -437,7 +437,7 @@ int ec_fsm_master_action_process_sdo(
 
                 req->state = EC_INT_REQUEST_BUSY;
                 if (master->debug_level)
-                    EC_DBG("Processing SDO request for slave %u...\n",
+                    EC_DBG("Processing internal SDO request for slave %u...\n",
                             slave->ring_position);
 
                 fsm->idle = 0;
@@ -450,86 +450,9 @@ int ec_fsm_master_action_process_sdo(
             }
         }
     }
-
-    // search the first external request to be processed
-    while (1) {
-        if (list_empty(&master->slave_sdo_requests))
-            break;
-
-        // get first request
-        request = list_entry(master->slave_sdo_requests.next,
-                ec_master_sdo_request_t, list);
-        list_del_init(&request->list); // dequeue
-        request->req.state = EC_INT_REQUEST_BUSY;
-
-        slave = request->slave;
-        if (slave->current_state == EC_SLAVE_STATE_INIT) {
-            EC_ERR("Discarding SDO request, slave %u is in INIT.\n",
-                    slave->ring_position);
-            request->req.state = EC_INT_REQUEST_FAILURE;
-            wake_up(&master->sdo_queue);
-            continue;
-        }
-
-        // Found pending SDO request. Execute it!
-        if (master->debug_level)
-            EC_DBG("Processing SDO request for slave %u...\n",
-                    slave->ring_position);
-
-        // Start uploading SDO
-        fsm->idle = 0;
-        fsm->sdo_request = &request->req;
-        fsm->slave = slave;
-        fsm->state = ec_fsm_master_state_sdo_request;
-        ec_fsm_coe_transfer(&fsm->fsm_coe, slave, &request->req);
-        ec_fsm_coe_exec(&fsm->fsm_coe); // execute immediately
-        return 1;
-    }
-
     return 0;
 }
 
-/*****************************************************************************/
-
-/** Check for pending FoE requests and process one.
- *
- * \return non-zero, if an FoE request is processed.
- */
-int ec_fsm_master_action_process_foe(
-        ec_fsm_master_t *fsm /**< Master state machine. */
-        )
-{
-    ec_master_t *master = fsm->master;
-    ec_slave_t *slave;
-    ec_master_foe_request_t *request;
-
-    // search the first request to be processed
-    while (1) {
-        if (list_empty(&master->foe_requests))
-            break;
-
-        // get first request
-        request = list_entry(master->foe_requests.next,
-                ec_master_foe_request_t, list);
-        list_del_init(&request->list); // dequeue
-        request->req.state = EC_INT_REQUEST_BUSY;
-        slave = request->slave;
-
-        if (master->debug_level)
-            EC_DBG("Processing FoE request for slave %u.\n",
-                    slave->ring_position);
-
-        fsm->foe_request = &request->req;
-        fsm->slave = slave;
-        fsm->state = ec_fsm_master_state_foe_request;
-        fsm->idle = 0;
-        ec_fsm_foe_transfer(&fsm->fsm_foe, slave, &request->req);
-        ec_fsm_foe_exec(&fsm->fsm_foe);
-        return 1;
-    }
-
-    return 0;
-}
 
 /*****************************************************************************/
 
@@ -544,15 +467,18 @@ void ec_fsm_master_action_idle(
     ec_master_t *master = fsm->master;
     ec_slave_t *slave;
 
-    // Check for pending SDO requests
+    // Check for pending internal SDO requests
     if (ec_fsm_master_action_process_sdo(fsm))
         return;
 
-    // Check for pending FoE requests
-    if (ec_fsm_master_action_process_foe(fsm))
-        return;
+	// enable processing of SDO/FOE requests
+	for (slave = master->slaves;
+			slave < master->slaves + master->slave_count;
+			slave++) {
+		ec_fsm_slave_ready(&slave->fsm);
+	}
 
-    // check, if slaves have an SDO dictionary to read out.
+	// check, if slaves have an SDO dictionary to read out.
     for (slave = master->slaves;
             slave < master->slaves + master->slave_count;
             slave++) {
@@ -943,12 +869,13 @@ void ec_fsm_master_state_write_sii(
 
     // finished writing SII
     if (master->debug_level)
-        EC_DBG("Finished writing %u words of SII data to slave %u.\n",
+        EC_DBG("Finished writing %zu words of SII data to slave %u.\n",
                 request->nwords, slave->ring_position);
 
     if (request->offset <= 4 && request->offset + request->nwords > 4) {
         // alias was written
         slave->sii.alias = EC_READ_U16(request->words + 4);
+        // TODO: read alias from register 0x0012
     }
     // TODO: Evaluate other SII contents!
 
@@ -958,43 +885,6 @@ void ec_fsm_master_state_write_sii(
     // check for another SII write request
     if (ec_fsm_master_action_process_sii(fsm))
         return; // processing another request
-
-    ec_fsm_master_restart(fsm);
-}
-
-/*****************************************************************************/
-
-/** Master state: WRITE FOE.
- */
-void ec_fsm_master_state_foe_request(
-        ec_fsm_master_t *fsm /**< Master state machine. */
-        )
-{
-    ec_master_t *master = fsm->master;
-    ec_foe_request_t *request = fsm->foe_request;
-    ec_slave_t *slave = fsm->slave;
-
-    if (ec_fsm_foe_exec(&fsm->fsm_foe))
-        return;
-
-    fsm->idle = 1;
-
-    if (!ec_fsm_foe_success(&fsm->fsm_foe)) {
-        EC_ERR("Failed to handle FoE request to slave %u.\n",
-                slave->ring_position);
-        request->state = EC_INT_REQUEST_FAILURE;
-        wake_up(&master->foe_queue);
-        ec_fsm_master_restart(fsm);
-        return;
-    }
-
-    // finished transferring FoE
-    if (master->debug_level)
-        EC_DBG("Successfully transferred %u bytes of FoE data from/to"
-                " slave %u.\n", request->data_size, slave->ring_position);
-
-    request->state = EC_INT_REQUEST_SUCCESS;
-    wake_up(&master->foe_queue);
 
     ec_fsm_master_restart(fsm);
 }
@@ -1046,20 +936,20 @@ void ec_fsm_master_state_sdo_request(
     if (ec_fsm_coe_exec(&fsm->fsm_coe)) return;
 
     if (!ec_fsm_coe_success(&fsm->fsm_coe)) {
-        EC_DBG("Failed to process SDO request for slave %u.\n",
+        EC_DBG("Failed to process internal SDO request for slave %u.\n",
                 fsm->slave->ring_position);
         request->state = EC_INT_REQUEST_FAILURE;
-        wake_up(&master->sdo_queue);
+        wake_up(&fsm->slave->sdo_queue);
         ec_fsm_master_restart(fsm);
         return;
     }
 
     // SDO request finished
     request->state = EC_INT_REQUEST_SUCCESS;
-    wake_up(&master->sdo_queue);
+    wake_up(&fsm->slave->sdo_queue);
 
     if (master->debug_level)
-        EC_DBG("Finished SDO request for slave %u.\n",
+        EC_DBG("Finished internal SDO request for slave %u.\n",
                 fsm->slave->ring_position);
 
     // check for another SDO request
@@ -1089,14 +979,14 @@ void ec_fsm_master_state_reg_request(
         ec_fsm_master_restart(fsm);
         return;
     }
-    
+
     if (datagram->working_counter == 1) {
         if (request->dir == EC_DIR_INPUT) { // read request
             if (request->data)
                 kfree(request->data);
             request->data = kmalloc(request->length, GFP_KERNEL);
             if (!request->data) {
-                EC_ERR("Failed to allocate %u bytes of memory for"
+                EC_ERR("Failed to allocate %zu bytes of memory for"
                         " register data.\n", request->length);
                 request->state = EC_INT_REQUEST_FAILURE;
                 wake_up(&master->reg_queue);

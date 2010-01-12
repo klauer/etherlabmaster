@@ -108,10 +108,12 @@ struct ec_master {
     ec_fsm_master_t fsm; /**< Master state machine. */
     ec_datagram_t fsm_datagram; /**< Datagram used for state machines. */
     ec_master_phase_t phase; /**< Master phase. */
+    unsigned int active; /**< Master has been activated. */
     unsigned int injection_seq_fsm; /**< Datagram injection sequence number
                                       for the FSM side. */
     unsigned int injection_seq_rt; /**< Datagram injection sequence number
                                      for the realtime side. */
+
 
     ec_slave_t *slaves; /**< Array of slaves on the bus. */
     unsigned int slave_count; /**< Number of slaves on the bus. */
@@ -125,6 +127,8 @@ struct ec_master {
                                        reference clock to the master clock. */
     ec_datagram_t sync_datagram; /**< Datagram used for DC drift
                                    compensation. */
+    ec_datagram_t sync_mon_datagram; /**< Datagram used for DC synchronisation
+                                       monitoring. */
     ec_slave_t *dc_ref_clock; /**< DC reference clock slave. */
     
     unsigned int scan_busy; /**< Current scan state. */
@@ -150,6 +154,9 @@ struct ec_master {
     struct semaphore ext_queue_sem; /**< Semaphore protecting the \a
                                       ext_datagram_queue. */
 
+    struct list_head external_datagram_queue; /**< External Datagram queue. */
+	size_t send_interval;	/* interval between calls to ecrt_master_send */
+    size_t max_queue_size; /** max. size of datagram queue */
     struct list_head domains; /**< List of domains. */
 
     unsigned int debug_level; /**< Master debug level. */
@@ -179,16 +186,9 @@ struct ec_master {
     wait_queue_head_t sii_queue; /**< Wait queue for SII
                                       write requests from user space. */
 
-    struct list_head slave_sdo_requests; /**< SDO access requests. */
-    wait_queue_head_t sdo_queue; /**< Wait queue for SDO access requests
-                                   from user space. */
-
     struct list_head reg_requests; /**< Register requests. */
     wait_queue_head_t reg_queue; /**< Wait queue for register requests. */
 
-    struct list_head foe_requests; /**< FoE write requests. */
-    wait_queue_head_t foe_queue; /**< Wait queue for FoE
-                                      write requests from user space. */
 };
 
 /*****************************************************************************/
@@ -217,8 +217,11 @@ void ec_master_eoe_stop(ec_master_t *);
 void ec_master_receive_datagrams(ec_master_t *, const uint8_t *, size_t);
 void ec_master_queue_datagram(ec_master_t *, ec_datagram_t *);
 void ec_master_queue_datagram_ext(ec_master_t *, ec_datagram_t *);
+void ec_master_queue_external_datagram(ec_master_t *, ec_datagram_t *);
+void ec_master_inject_external_datagrams(ec_master_t *);
 
 // misc.
+void ec_master_set_send_interval(ec_master_t *,size_t);
 void ec_master_attach_slave_configs(ec_master_t *);
 ec_slave_t *ec_master_find_slave(ec_master_t *, uint16_t, uint16_t);
 const ec_slave_t *ec_master_find_slave_const(const ec_master_t *, uint16_t,

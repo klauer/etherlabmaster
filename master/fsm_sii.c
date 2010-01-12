@@ -248,7 +248,6 @@ void ec_fsm_sii_state_read_check(
    SII state: READ FETCH.
    Fetches the result of an SII-read datagram.
 */
-
 void ec_fsm_sii_state_read_fetch(
         ec_fsm_sii_t *fsm /**< finite state machine */
         )

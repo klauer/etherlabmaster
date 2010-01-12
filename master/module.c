@@ -101,7 +101,7 @@ int __init ec_init_module(void)
 
     EC_INFO("Master driver %s\n", EC_MASTER_VERSION);
 
-    init_MUTEX(&master_sem);
+    sema_init(&master_sem, 1);
 
     if (master_count) {
         if (alloc_chrdev_region(&device_number, 0, master_count, "EtherCAT")) {
@@ -318,6 +318,8 @@ static int ec_mac_parse(uint8_t *mac, const char *src, int allow_empty)
 /*****************************************************************************/
 
 /** Outputs frame contents for debugging purposes.
+ * If the data block is larger than 256 bytes, only the first 128
+ * and the last 128 bytes will be shown
  */
 void ec_print_data(const uint8_t *data, /**< pointer to data */
                    size_t size /**< number of bytes to output */
@@ -330,6 +332,12 @@ void ec_print_data(const uint8_t *data, /**< pointer to data */
         printk("%02X ", data[i]);
         if ((i + 1) % 16 == 0 && i < size - 1) {
             printk("\n");
+            EC_DBG("");
+        }
+        if (i+1 == 128 && size > 256)
+        {
+            printk("dropped %d bytes\n",size-128-i);
+            i = size - 128;
             EC_DBG("");
         }
     }
@@ -463,7 +471,8 @@ ec_device_t *ecdev_offer(
             ec_device_attach(&master->main_device, net_dev, poll, module);
             up(&master->device_sem);
             
-            sprintf(net_dev->name, "ec%u", master->index);
+            snprintf(net_dev->name, IFNAMSIZ, "ec%u", master->index);
+
             return &master->main_device; // offer accepted
         }
         else {

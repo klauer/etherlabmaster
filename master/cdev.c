@@ -175,6 +175,7 @@ int ec_cdev_ioctl_master(
     data.eoe_handler_count = ec_master_eoe_handler_count(master);
 #endif
     data.phase = (uint8_t) master->phase;
+    data.active = (uint8_t) master->active;
     data.scan_busy = master->scan_busy;
     up(&master->master_sem);
 
@@ -586,7 +587,7 @@ int ec_cdev_ioctl_domain_data(
 
     if (domain->data_size != data.data_size) {
         up(&master->master_sem);
-        EC_ERR("Data size mismatch %u/%u!\n",
+        EC_ERR("Data size mismatch %u/%zu!\n",
                 data.data_size, domain->data_size);
         return -EFAULT;
     }
@@ -804,18 +805,20 @@ int ec_cdev_ioctl_slave_sdo_upload(
         return -EINVAL;
     }
 
+    if (master->debug_level)
+        EC_DBG("Schedule SDO upload request for slave %u\n",request.slave->ring_position);
     // schedule request.
-    list_add_tail(&request.list, &master->slave_sdo_requests);
+    list_add_tail(&request.list, &request.slave->slave_sdo_requests);
 
     up(&master->master_sem);
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->sdo_queue,
+    if (wait_event_interruptible(request.slave->sdo_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
         if (request.req.state == EC_INT_REQUEST_QUEUED) {
-            list_del(&request.req.list);
+            list_del(&request.list);
             up(&master->master_sem);
             ec_sdo_request_clear(&request.req);
             return -EINTR;
@@ -825,7 +828,10 @@ int ec_cdev_ioctl_slave_sdo_upload(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
+
+    if (master->debug_level)
+        EC_DBG("Scheduled SDO upload request for slave %u done\n",request.slave->ring_position);
 
     data.abort_code = request.req.abort_code;
 
@@ -905,18 +911,20 @@ int ec_cdev_ioctl_slave_sdo_download(
         return -EINVAL;
     }
     
+    if (master->debug_level)
+        EC_DBG("Schedule SDO download request for slave %u\n",request.slave->ring_position);
     // schedule request.
-    list_add_tail(&request.list, &master->slave_sdo_requests);
+    list_add_tail(&request.list, &request.slave->slave_sdo_requests);
 
     up(&master->master_sem);
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->sdo_queue,
+    if (wait_event_interruptible(request.slave->sdo_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
         if (request.req.state == EC_INT_REQUEST_QUEUED) {
-            list_del(&request.req.list);
+            list_del(&request.list);
             up(&master->master_sem);
             ec_sdo_request_clear(&request.req);
             return -EINTR;
@@ -926,7 +934,10 @@ int ec_cdev_ioctl_slave_sdo_download(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->sdo_queue, request.req.state != EC_INT_REQUEST_BUSY);
+
+    if (master->debug_level)
+        EC_DBG("Scheduled SDO download request for slave %u done\n",request.slave->ring_position);
 
     data.abort_code = request.req.abort_code;
 
@@ -971,7 +982,7 @@ int ec_cdev_ioctl_slave_sii_read(
             || data.offset + data.nwords > slave->sii_nwords) {
         up(&master->master_sem);
         EC_ERR("Invalid SII read offset/size %u/%u for slave "
-                "SII size %u!\n", data.offset,
+                "SII size %zu!\n", data.offset,
                 data.nwords, slave->sii_nwords);
         return -EINVAL;
     }
@@ -1434,7 +1445,8 @@ int ec_cdev_ioctl_config_sdo(
     data.index = req->index;
     data.subindex = req->subindex;
     data.size = req->data_size;
-    memcpy(&data.data, req->data, min((u32) data.size, (u32) 4));
+    memcpy(&data.data, req->data,
+            min((u32) data.size, (u32) EC_MAX_SDO_DATA_SIZE));
 
     up(&master->master_sem);
 
@@ -1646,6 +1658,49 @@ int ec_cdev_ioctl_activate(
 
 /*****************************************************************************/
 
+/** Deactivates the master.
+ */
+int ec_cdev_ioctl_deactivate(
+        ec_master_t *master, /**< EtherCAT master. */
+        unsigned long arg, /**< ioctl() argument. */
+        ec_cdev_priv_t *priv /**< Private data structure of file handle. */
+        )
+{
+    if (unlikely(!priv->requested))
+        return -EPERM;
+
+    ecrt_master_deactivate(master);
+    return 0;
+}
+
+
+/*****************************************************************************/
+
+/** Set max. number of databytes in a cycle
+ */
+int ec_cdev_ioctl_set_send_interval(
+        ec_master_t *master, /**< EtherCAT master. */
+        unsigned long arg, /**< ioctl() argument. */
+        ec_cdev_priv_t *priv /**< Private data structure of file handle. */
+        )
+{
+	size_t send_interval;
+
+	if (copy_from_user(&send_interval, (void __user *) arg, sizeof(send_interval))) {
+        return -EFAULT;
+    }
+
+    if (down_interruptible(&master->master_sem))
+        return -EINTR;
+	ec_master_set_send_interval(master,send_interval);
+    up(&master->master_sem);
+
+    return 0;
+}
+
+
+/*****************************************************************************/
+
 /** Send frames.
  */
 int ec_cdev_ioctl_send(
@@ -1763,6 +1818,50 @@ int ec_cdev_ioctl_sync_slaves(
     down(&master->io_sem);
     ecrt_master_sync_slave_clocks(master);
     up(&master->io_sem);
+    return 0;
+}
+
+/*****************************************************************************/
+
+/** Queue the sync monitoring datagram.
+ */
+int ec_cdev_ioctl_sync_mon_queue(
+        ec_master_t *master, /**< EtherCAT master. */
+        unsigned long arg, /**< ioctl() argument. */
+        ec_cdev_priv_t *priv /**< Private data structure of file handle. */
+        )
+{
+    if (unlikely(!priv->requested))
+        return -EPERM;
+
+    down(&master->io_sem);
+    ecrt_master_sync_monitor_queue(master);
+    up(&master->io_sem);
+    return 0;
+}
+
+/*****************************************************************************/
+
+/** Processes the sync monitoring datagram.
+ */
+int ec_cdev_ioctl_sync_mon_process(
+        ec_master_t *master, /**< EtherCAT master. */
+        unsigned long arg, /**< ioctl() argument. */
+        ec_cdev_priv_t *priv /**< Private data structure of file handle. */
+        )
+{
+    uint32_t time_diff;
+
+    if (unlikely(!priv->requested))
+        return -EPERM;
+
+    down(&master->io_sem);
+    time_diff = ecrt_master_sync_monitor_process(master);
+    up(&master->io_sem);
+
+    if (copy_to_user((void __user *) arg, &time_diff, sizeof(time_diff)))
+        return -EFAULT;
+
     return 0;
 }
 
@@ -2120,8 +2219,12 @@ int ec_cdev_ioctl_sc_sdo(
 
     up(&master->master_sem); // FIXME
 
-    ret = ecrt_slave_config_sdo(sc, data.index, data.subindex, sdo_data,
-            data.size);
+    if (data.complete_access) {
+        ret = ecrt_slave_config_complete_sdo(sc, data.index, sdo_data, data.size);
+    } else {
+        ret = ecrt_slave_config_sdo(sc, data.index, data.subindex, sdo_data,
+                data.size);
+    }
     kfree(sdo_data);
     return ret;
 }
@@ -2954,7 +3057,7 @@ int ec_cdev_ioctl_slave_foe_read(
     }
 
     // schedule request.
-    list_add_tail(&request.list, &master->foe_requests);
+    list_add_tail(&request.list, &request.slave->foe_requests);
 
     up(&master->master_sem);
 
@@ -2964,7 +3067,7 @@ int ec_cdev_ioctl_slave_foe_read(
     }
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->foe_queue,
+    if (wait_event_interruptible(request.slave->foe_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
@@ -2979,13 +3082,13 @@ int ec_cdev_ioctl_slave_foe_read(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
 
     data.result = request.req.result;
     data.error_code = request.req.error_code;
 
     if (master->debug_level) {
-        EC_DBG("Read %d bytes via FoE (result = 0x%x).\n",
+        EC_DBG("Read %zd bytes via FoE (result = 0x%x).\n",
                 request.req.data_size, request.req.result);
     }
 
@@ -3069,12 +3172,12 @@ int ec_cdev_ioctl_slave_foe_write(
     }
 
     // schedule FoE write request.
-    list_add_tail(&request.list, &master->foe_requests);
+    list_add_tail(&request.list, &request.slave->foe_requests);
 
     up(&master->master_sem);
 
     // wait for processing through FSM
-    if (wait_event_interruptible(master->foe_queue,
+    if (wait_event_interruptible(request.slave->foe_queue,
                 request.req.state != EC_INT_REQUEST_QUEUED)) {
         // interrupted by signal
         down(&master->master_sem);
@@ -3089,7 +3192,7 @@ int ec_cdev_ioctl_slave_foe_write(
     }
 
     // wait until master FSM has finished processing
-    wait_event(master->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
+    wait_event(request.slave->foe_queue, request.req.state != EC_INT_REQUEST_BUSY);
 
     data.result = request.req.result;
     data.error_code = request.req.error_code;
@@ -3257,6 +3360,10 @@ long eccdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             if (!(filp->f_mode & FMODE_WRITE))
                 return -EPERM;
             return ec_cdev_ioctl_activate(master, arg, priv);
+        case EC_IOCTL_DEACTIVATE:
+            if (!(filp->f_mode & FMODE_WRITE))
+                return -EPERM;
+            return ec_cdev_ioctl_deactivate(master, arg, priv);
         case EC_IOCTL_SEND:
             if (!(filp->f_mode & FMODE_WRITE))
                 return -EPERM;
@@ -3279,6 +3386,14 @@ long eccdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             if (!(filp->f_mode & FMODE_WRITE))
                 return -EPERM;
             return ec_cdev_ioctl_sync_slaves(master, arg, priv);
+        case EC_IOCTL_SYNC_MON_QUEUE:
+            if (!(filp->f_mode & FMODE_WRITE))
+                return -EPERM;
+            return ec_cdev_ioctl_sync_mon_queue(master, arg, priv);
+        case EC_IOCTL_SYNC_MON_PROCESS:
+            if (!(filp->f_mode & FMODE_WRITE))
+                return -EPERM;
+            return ec_cdev_ioctl_sync_mon_process(master, arg, priv);
         case EC_IOCTL_SC_SYNC:
             if (!(filp->f_mode & FMODE_WRITE))
                 return -EPERM;
@@ -3377,6 +3492,10 @@ long eccdev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
             return ec_cdev_ioctl_voe_exec(master, arg, priv);
         case EC_IOCTL_VOE_DATA:
             return ec_cdev_ioctl_voe_data(master, arg, priv);
+		case EC_IOCTL_SET_SEND_INTERVAL:
+            if (!(filp->f_mode & FMODE_WRITE))
+                return -EPERM;
+			return ec_cdev_ioctl_set_send_interval(master,arg,priv);
         default:
             return -ENOTTY;
     }

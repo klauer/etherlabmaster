@@ -67,6 +67,7 @@ void ec_slave_init(
         )
 {
     unsigned int i;
+    int ret;
 
     slave->master = master;
     slave->ring_position = ring_position;
@@ -147,6 +148,26 @@ void ec_slave_init(
 
     slave->sdo_dictionary_fetched = 0;
     slave->jiffies_preop = 0;
+
+    INIT_LIST_HEAD(&slave->slave_sdo_requests);
+    init_waitqueue_head(&slave->sdo_queue);
+
+    INIT_LIST_HEAD(&slave->foe_requests);
+    init_waitqueue_head(&slave->foe_queue);
+
+    // init state machine datagram
+    ec_datagram_init(&slave->fsm_datagram);
+    snprintf(slave->fsm_datagram.name, EC_DATAGRAM_NAME_SIZE, "slave%u-fsm",slave->ring_position);
+    ret = ec_datagram_prealloc(&slave->fsm_datagram, EC_MAX_DATA_SIZE);
+    if (ret < 0) {
+        ec_datagram_clear(&slave->fsm_datagram);
+        EC_ERR("Failed to allocate Slave %u FSM datagram.\n",slave->ring_position);
+        return;
+    }
+
+    // create state machine object
+    ec_fsm_slave_init(&slave->fsm, slave, &slave->fsm_datagram);
+
 }
 
 /*****************************************************************************/
@@ -191,6 +212,9 @@ void ec_slave_clear(ec_slave_t *slave /**< EtherCAT slave */)
 
     if (slave->sii_words)
         kfree(slave->sii_words);
+    ec_fsm_slave_clear(&slave->fsm);
+    ec_datagram_clear(&slave->fsm_datagram);
+
 }
 
 /*****************************************************************************/
@@ -321,7 +345,7 @@ int ec_slave_fetch_sii_general(
     uint8_t flags;
 
     if (data_size != 32) {
-        EC_ERR("Wrong size of general category (%u/32) in slave %u.\n",
+        EC_ERR("Wrong size of general category (%zu/32) in slave %u.\n",
                 data_size, slave->ring_position);
         return -EINVAL;
     }
@@ -376,7 +400,7 @@ int ec_slave_fetch_sii_syncs(
 
     // one sync manager struct is 4 words long
     if (data_size % 8) {
-        EC_ERR("Invalid SII sync manager category size %u in slave %u.\n",
+        EC_ERR("Invalid SII sync manager category size %zu in slave %u.\n",
                 data_size, slave->ring_position);
         return -EINVAL;
     }
@@ -391,7 +415,7 @@ int ec_slave_fetch_sii_syncs(
         }
         memsize = sizeof(ec_sync_t) * total_count;
         if (!(syncs = kmalloc(memsize, GFP_KERNEL))) {
-            EC_ERR("Failed to allocate %u bytes for sync managers.\n",
+            EC_ERR("Failed to allocate %zu bytes for sync managers.\n",
                     memsize);
             return -ENOMEM;
         }

@@ -125,6 +125,7 @@ int ecrt_master(ec_master_t* master, ec_master_info_t *master_info)
 
     master_info->slave_count = data.slave_count;
     master_info->link_up = data.devices[0].link_state;
+    master_info->scan_busy = data.scan_busy;
     master_info->app_time = data.app_time;
     return 0;
 }
@@ -155,7 +156,7 @@ int ecrt_master_get_slave(ec_master_t *master, uint16_t slave_position,
     slave_info->error_flag = data.error_flag;
     slave_info->sync_count = data.sync_count;
     slave_info->sdo_count = data.sdo_count;
-    strncpy(slave_info->name, data.name, EC_IOCTL_STRING_SIZE);
+    strncpy(slave_info->name, data.name, EC_MAX_STRING_LENGTH);
     return 0;
 }
 
@@ -335,6 +336,31 @@ int ecrt_master_activate(ec_master_t *master)
 
 /*****************************************************************************/
 
+void ecrt_master_deactivate(ec_master_t *master)
+{
+    if (ioctl(master->fd, EC_IOCTL_DEACTIVATE, NULL) == -1) {
+        fprintf(stderr, "Failed to deactivate master: %s\n", strerror(errno));
+        return;
+    }
+}
+
+
+/*****************************************************************************/
+
+int ecrt_master_set_send_interval(ec_master_t *master,size_t send_interval_us)
+{
+	if (ioctl(master->fd, EC_IOCTL_SET_SEND_INTERVAL,
+				&send_interval_us) == -1) {
+		fprintf(stderr, "Failed to set send interval: %s\n",
+                strerror(errno));
+        return -1; // FIXME
+    }
+    return 0;
+}
+
+
+/*****************************************************************************/
+
 void ecrt_master_send(ec_master_t *master)
 {
     if (ioctl(master->fd, EC_IOCTL_SEND, NULL) == -1) {
@@ -391,6 +417,31 @@ void ecrt_master_sync_slave_clocks(ec_master_t *master)
     if (ioctl(master->fd, EC_IOCTL_SYNC_SLAVES, NULL) == -1) {
         fprintf(stderr, "Failed to sync slave clocks: %s\n", strerror(errno));
     }
+}
+
+/*****************************************************************************/
+
+void ecrt_master_sync_monitor_queue(ec_master_t *master)
+{
+    if (ioctl(master->fd, EC_IOCTL_SYNC_MON_QUEUE, NULL) == -1) {
+        fprintf(stderr, "Failed to queue sync monitor datagram: %s\n",
+                strerror(errno));
+    }
+}
+
+/*****************************************************************************/
+
+uint32_t ecrt_master_sync_monitor_process(ec_master_t *master)
+{
+    uint32_t time_diff;
+
+    if (ioctl(master->fd, EC_IOCTL_SYNC_MON_PROCESS, &time_diff) == -1) {
+        time_diff = 0xffffffff;
+        fprintf(stderr, "Failed to process sync monitor datagram: %s\n",
+                strerror(errno));
+    }
+
+    return time_diff;
 }
 
 /*****************************************************************************/
