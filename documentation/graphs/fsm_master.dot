@@ -1,0 +1,67 @@
+
+/* $Id$ */
+
+digraph master {
+    size="7,9"
+    center=1
+    ratio=fill
+
+    start [fontname="Helvetica"]
+    start -> broadcast [weight=10]
+
+    broadcast [fontname="Helvetica"]
+    broadcast -> start
+    broadcast -> clear_addresses
+    broadcast -> read_state [weight=10]
+
+    action_process_sii [shape=point,label=""]
+    action_process_sii -> write_sii
+
+    action_process_sdo [shape=point,label=""]
+    action_process_sdo -> sdo_request
+
+    action_idle [shape=point,label=""]
+    action_idle -> action_process_sdo
+    action_idle -> sdo_dictionary
+    action_idle -> action_process_sii
+    action_idle -> start
+
+    action_next_slave_state [shape=point,label=""]
+    action_next_slave_state -> read_state
+    action_next_slave_state -> action_idle [weight=10]
+    
+    action_configure [shape=point,label=""]
+    action_configure -> configure_slave [weight=10]
+    action_configure -> action_next_slave_state
+
+    read_state [fontname="Helvetica"]
+    read_state -> acknowledge [weight=10]
+    read_state -> action_configure
+    read_state -> action_next_slave_state
+
+    acknowledge [fontname="Helvetica"]
+    acknowledge -> action_configure [weight=10]
+
+    clear_addresses [fontname="Helvetica"]
+    clear_addresses -> dc_measure_delays [weight=10]
+
+    dc_measure_delays [fontname="Helvetica"]
+    dc_measure_delays -> scan_slave [weight=10]
+
+    scan_slave [fontname="Helvetica"]
+    scan_slave -> start
+
+    configure_slave [fontname="Helvetica"]
+    configure_slave -> action_next_slave_state
+
+    write_sii [fontname="Helvetica"]
+    write_sii -> action_process_sii
+    write_sii -> start
+
+    sdo_dictionary [fontname="Helvetica"]
+    sdo_dictionary -> start
+
+    sdo_request [fontname="Helvetica"]
+    sdo_request -> action_process_sdo
+    sdo_request -> start
+}
