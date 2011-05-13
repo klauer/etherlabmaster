@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -64,6 +60,7 @@ void ec_domain_init(
     domain->index = index;
     INIT_LIST_HEAD(&domain->fmmu_configs);
     domain->data_size = 0;
+    domain->tx_size = 0;
     domain->data = NULL;
     domain->data_origin = EC_ORIG_INTERNAL;
     domain->logical_base_address = 0x00000000;
@@ -84,8 +81,6 @@ void ec_domain_clear(ec_domain_t *domain /**< EtherCAT domain */)
 
     // dequeue and free datagrams
     list_for_each_entry_safe(datagram, next, &domain->datagrams, list) {
-        if (!list_empty(&datagram->queue)) // datagram queued?
-            list_del(&datagram->queue);
         ec_datagram_clear(datagram);
         kfree(datagram);
     }
@@ -119,11 +114,12 @@ void ec_domain_add_fmmu_config(
     fmmu->domain = domain;
 
     domain->data_size += fmmu->data_size;
+    domain->tx_size += fmmu->tx_size;
     list_add_tail(&fmmu->list, &domain->fmmu_configs);
 
-    if (domain->master->debug_level)
-        EC_DBG("Domain %u: Added %u bytes, total %u.\n", domain->index,
-                fmmu->data_size, domain->data_size);
+    EC_MASTER_DBG(domain->master, 1, "Domain %u:"
+            " Added %u bytes, total %zu.\n",
+            domain->index, fmmu->data_size, domain->data_size);
 }
 
 /*****************************************************************************/
@@ -133,7 +129,8 @@ void ec_domain_add_fmmu_config(
  * The datagram type and expected working counters are determined by the
  * number of input and output fmmus that share the datagram.
  *
- * \return 0 in case of success, else < 0
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ec_domain_add_datagram(
         ec_domain_t *domain, /**< EtherCAT domain. */
@@ -144,10 +141,12 @@ int ec_domain_add_datagram(
         )
 {
     ec_datagram_t *datagram;
+    int ret;
 
     if (!(datagram = kmalloc(sizeof(ec_datagram_t), GFP_KERNEL))) {
-        EC_ERR("Failed to allocate domain datagram!\n");
-        return -1;
+        EC_MASTER_ERR(domain->master,
+                "Failed to allocate domain datagram!\n");
+        return -ENOMEM;
     }
 
     ec_datagram_init(datagram);
@@ -155,29 +154,34 @@ int ec_domain_add_datagram(
             "domain%u-%u", domain->index, logical_offset);
 
     if (used[EC_DIR_OUTPUT] && used[EC_DIR_INPUT]) { // inputs and outputs
-        if (ec_datagram_lrw(datagram, logical_offset, data_size, data)) {
+        ret = ec_datagram_lrw(datagram, logical_offset, data_size, data);
+        if (ret < 0) {
             kfree(datagram);
-            return -1;
+            return ret;
         }
         // If LRW is used, output FMMUs increment the working counter by 2,
         // while input FMMUs increment it by 1.
-        domain->expected_working_counter =
+        domain->expected_working_counter +=
             used[EC_DIR_OUTPUT] * 2 + used[EC_DIR_INPUT];
     } else if (used[EC_DIR_OUTPUT]) { // outputs only
-        if (ec_datagram_lwr(datagram, logical_offset, data_size, data)) {
+        ret = ec_datagram_lwr(datagram, logical_offset, data_size, data);
+        if (ret < 0) {
             kfree(datagram);
-            return -1;
+            return ret;
         }
-        domain->expected_working_counter = used[EC_DIR_OUTPUT];
+        domain->expected_working_counter += used[EC_DIR_OUTPUT];
     } else { // inputs only (or nothing)
-        if (ec_datagram_lrd(datagram, logical_offset, data_size, data)) {
+        ret = ec_datagram_lrd(datagram, logical_offset, data_size, data);
+        if (ret < 0) {
             kfree(datagram);
-            return -1;
+            return ret;
         }
-        domain->expected_working_counter = used[EC_DIR_INPUT];
+        domain->expected_working_counter += used[EC_DIR_INPUT];
     }
 
+    ec_datagram_zero(datagram);
     list_add_tail(&datagram->list, &domain->datagrams);
+    datagram->domain = domain;
     return 0;
 }
 
@@ -190,8 +194,8 @@ int ec_domain_add_datagram(
  *
  * \todo Check for FMMUs that do not fit into any datagram.
  *
- * \retval 0 in case of success
- * \retval <0 on failure.
+ * \retval  0 Success
+ * \retval <0 Error code.
  */
 int ec_domain_finish(
         ec_domain_t *domain, /**< EtherCAT domain. */
@@ -203,16 +207,19 @@ int ec_domain_finish(
     unsigned int datagram_count;
     unsigned int datagram_used[EC_DIR_COUNT];
     ec_fmmu_config_t *fmmu;
+    ec_fmmu_config_t *fmmu_temp;
     const ec_datagram_t *datagram;
+    int ret;
 
     domain->logical_base_address = base_address;
 
     if (domain->data_size && domain->data_origin == EC_ORIG_INTERNAL) {
         if (!(domain->data =
                     (uint8_t *) kmalloc(domain->data_size, GFP_KERNEL))) {
-            EC_ERR("Failed to allocate %u bytes internal memory for"
-                    " domain %u!\n", domain->data_size, domain->index);
-            return -1;
+            EC_MASTER_ERR(domain->master, "Failed to allocate %zu bytes"
+                    " internal memory for domain %u!\n",
+                    domain->data_size, domain->index);
+            return -ENOMEM;
         }
     }
 
@@ -225,51 +232,69 @@ int ec_domain_finish(
     datagram_used[EC_DIR_OUTPUT] = 0;
     datagram_used[EC_DIR_INPUT] = 0;
 
+    list_for_each_entry(fmmu_temp, &domain->fmmu_configs, list) {
+        // we have to remove the constness, sorry FIXME
+        ec_slave_config_t *sc = (ec_slave_config_t *) fmmu_temp->sc;
+        sc->used_for_fmmu_datagram[fmmu_temp->dir] = 0;
+    }
+
     list_for_each_entry(fmmu, &domain->fmmu_configs, list) {
         // Correct logical FMMU address
         fmmu->logical_start_address += base_address;
+        fmmu->domain_address += base_address;
 
         // Increment Input/Output counter to determine datagram types
         // and calculate expected working counters
-        datagram_used[fmmu->dir]++;
+        if (fmmu->sc->used_for_fmmu_datagram[fmmu->dir] == 0) {
+            ec_slave_config_t *sc = (ec_slave_config_t *)fmmu->sc;
+            datagram_used[fmmu->dir]++;
+            sc->used_for_fmmu_datagram[fmmu->dir] = 1;
+        }
 
         // If the current FMMU's data do not fit in the current datagram,
         // allocate a new one.
-        if (datagram_size + fmmu->data_size > EC_MAX_DATA_SIZE) {
-            if (ec_domain_add_datagram(domain,
-                        domain->logical_base_address + datagram_offset,
-                        datagram_size, domain->data + datagram_offset,
-                        datagram_used))
-                return -1;
+        if (datagram_size + fmmu->tx_size > EC_MAX_DATA_SIZE) {
+            ret = ec_domain_add_datagram(domain,
+                    domain->logical_base_address + datagram_offset,
+                    datagram_size, domain->data + datagram_offset,
+                    datagram_used);
+            if (ret < 0)
+                return ret;
             datagram_offset += datagram_size;
             datagram_size = 0;
             datagram_count++;
             datagram_used[EC_DIR_OUTPUT] = 0;
             datagram_used[EC_DIR_INPUT] = 0;
+            list_for_each_entry(fmmu_temp, &domain->fmmu_configs, list) {
+                ec_slave_config_t *sc = (ec_slave_config_t *)fmmu_temp->sc;
+               sc->used_for_fmmu_datagram[fmmu_temp->dir] = 0;
+            }
         }
 
-        datagram_size += fmmu->data_size;
+        datagram_size += fmmu->tx_size;
     }
 
     // Allocate last datagram, if data are left (this is also the case if the
     // process data fit into a single datagram)
     if (datagram_size) {
-        if (ec_domain_add_datagram(domain,
-                    domain->logical_base_address + datagram_offset,
-                    datagram_size, domain->data + datagram_offset,
-                    datagram_used))
-            return -1;
+        ret = ec_domain_add_datagram(domain,
+                domain->logical_base_address + datagram_offset,
+                datagram_size, domain->data + datagram_offset,
+                datagram_used);
+        if (ret < 0)
+            return ret;
         datagram_count++;
     }
 
-    EC_INFO("Domain%u: Logical address 0x%08x, %u byte, "
-            "expected working counter %u.\n", domain->index,
+    EC_MASTER_INFO(domain->master, "Domain%u: Logical address 0x%08x,"
+            " %zu byte, expected working counter %u.\n", domain->index,
             domain->logical_base_address, domain->data_size,
             domain->expected_working_counter);
     list_for_each_entry(datagram, &domain->datagrams, list) {
-        EC_INFO("  Datagram %s: Logical offset 0x%08x, %u byte, type %s.\n",
-                datagram->name, EC_READ_U32(datagram->address),
-                datagram->data_size, ec_datagram_type_string(datagram));
+        EC_MASTER_INFO(domain->master, "  Datagram %s: Logical offset 0x%08x,"
+                " %zu byte, type %s.\n", datagram->name,
+                EC_READ_U32(datagram->address), datagram->data_size,
+                ec_datagram_type_string(datagram));
     }
     
     return 0;
@@ -322,18 +347,19 @@ int ecrt_domain_reg_pdo_entry_list(ec_domain_t *domain,
     ec_slave_config_t *sc;
     int ret;
     
-    if (domain->master->debug_level)
-        EC_DBG("ecrt_domain_reg_pdo_entry_list(domain = 0x%x, regs = 0x%x)\n",
-                (u32) domain, (u32) regs);
+    EC_MASTER_DBG(domain->master, 1, "ecrt_domain_reg_pdo_entry_list("
+            "domain = 0x%p, regs = 0x%p)\n", domain, regs);
 
     for (reg = regs; reg->index; reg++) {
-        if (!(sc = ecrt_master_slave_config(domain->master, reg->alias,
-                        reg->position, reg->vendor_id, reg->product_code)))
-            return -1;
+        sc = ecrt_master_slave_config_err(domain->master, reg->alias,
+                reg->position, reg->vendor_id, reg->product_code);
+        if (IS_ERR(sc))
+            return PTR_ERR(sc);
 
-        if ((ret = ecrt_slave_config_reg_pdo_entry(sc, reg->index,
-                        reg->subindex, domain, reg->bit_position)) < 0)
-            return -1;
+        ret = ecrt_slave_config_reg_pdo_entry(sc, reg->index,
+                        reg->subindex, domain, reg->bit_position);
+        if (ret < 0)
+            return ret;
 
         *reg->offset = ret;
     }
@@ -343,7 +369,7 @@ int ecrt_domain_reg_pdo_entry_list(ec_domain_t *domain,
 
 /*****************************************************************************/
 
-size_t ecrt_domain_size(ec_domain_t *domain)
+size_t ecrt_domain_size(const ec_domain_t *domain)
 {
     return domain->data_size;
 }
@@ -352,18 +378,17 @@ size_t ecrt_domain_size(ec_domain_t *domain)
 
 void ecrt_domain_external_memory(ec_domain_t *domain, uint8_t *mem)
 {
-    if (domain->master->debug_level)
-        EC_DBG("ecrt_domain_external_memory(domain = 0x%x, mem = 0x%x)\n",
-                (u32) domain, (u32) mem);
+    EC_MASTER_DBG(domain->master, 1, "ecrt_domain_external_memory("
+            "domain = 0x%p, mem = 0x%p)\n", domain, mem);
 
-    down(&domain->master->master_sem);
+    ec_mutex_lock(&domain->master->master_mutex);
 
     ec_domain_clear_data(domain);
 
     domain->data = mem;
     domain->data_origin = EC_ORIG_EXTERNAL;
 
-    up(&domain->master->master_sem);
+    ec_mutex_unlock(&domain->master->master_mutex);
 }
 
 /*****************************************************************************/
@@ -397,13 +422,14 @@ void ecrt_domain_process(ec_domain_t *domain)
         jiffies - domain->notify_jiffies > HZ) {
         domain->notify_jiffies = jiffies;
         if (domain->working_counter_changes == 1) {
-            EC_INFO("Domain %u: Working counter changed to %u/%u.\n",
-                    domain->index, domain->working_counter,
-                    domain->expected_working_counter);
-        } else {
-            EC_INFO("Domain %u: %u working counter changes - now %u/%u.\n",
-                    domain->index, domain->working_counter_changes,
+            EC_MASTER_INFO(domain->master, "Domain %u: Working counter"
+                    " changed to %u/%u.\n", domain->index,
                     domain->working_counter, domain->expected_working_counter);
+        } else {
+            EC_MASTER_INFO(domain->master, "Domain %u: %u working counter"
+                    " changes - now %u/%u.\n", domain->index,
+                    domain->working_counter_changes, domain->working_counter,
+                    domain->expected_working_counter);
         }
         domain->working_counter_changes = 0;
     }

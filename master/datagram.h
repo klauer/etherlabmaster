@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -46,11 +42,6 @@
 #include <linux/timex.h>
 
 #include "globals.h"
-
-/*****************************************************************************/
-
-/** Size of the datagram description string. */
-#define EC_DATAGRAM_NAME_SIZE 20
 
 /*****************************************************************************/
 
@@ -95,7 +86,8 @@ typedef enum {
  */
 typedef struct {
     struct list_head list; /**< Needed by domain datagram lists. */
-    struct list_head queue; /**< Master datagram queue item. */
+    struct list_head queue; /**< Master datagram send-receive queue item. */
+    struct list_head fsm_queue; /**< Master datagram fsm queue item. */
     struct list_head sent; /**< Master list item for sent datagrams. */
     ec_datagram_type_t type; /**< Datagram type (APRD, BWR, etc.). */
     uint8_t address[EC_ADDR_LEN]; /**< Recipient address. */
@@ -103,6 +95,7 @@ typedef struct {
     ec_origin_t data_origin; /**< Origin of the \a data memory. */
     size_t mem_size; /**< Datagram \a data memory size. */
     size_t data_size; /**< Size of the data in \a data. */
+    ec_domain_t *domain; /**< Owning domain (may be null for non-domain datagrams) */
     uint8_t index; /**< Index (set by master). */
     uint16_t working_counter; /**< Working counter. */
     ec_datagram_state_t state; /**< State. */
@@ -124,7 +117,9 @@ typedef struct {
 
 void ec_datagram_init(ec_datagram_t *);
 void ec_datagram_clear(ec_datagram_t *);
+void ec_datagram_unqueue(ec_datagram_t *);
 int ec_datagram_prealloc(ec_datagram_t *, size_t);
+void ec_datagram_zero(ec_datagram_t *);
 
 int ec_datagram_aprd(ec_datagram_t *, uint16_t, uint16_t, size_t);
 int ec_datagram_apwr(ec_datagram_t *, uint16_t, uint16_t, size_t);
@@ -141,6 +136,7 @@ int ec_datagram_lrd(ec_datagram_t *, uint32_t, size_t, uint8_t *);
 int ec_datagram_lwr(ec_datagram_t *, uint32_t, size_t, uint8_t *);
 int ec_datagram_lrw(ec_datagram_t *, uint32_t, size_t, uint8_t *);
 
+void ec_datagram_print_state(const ec_datagram_t *);
 void ec_datagram_print_wc_error(const ec_datagram_t *);
 void ec_datagram_output_stats(ec_datagram_t *);
 const char *ec_datagram_type_string(const ec_datagram_t *);

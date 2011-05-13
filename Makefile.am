@@ -2,84 +2,115 @@
 #
 #  $Id$
 #
-#  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+#  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
 #
 #  This file is part of the IgH EtherCAT Master.
 #
-#  The IgH EtherCAT Master is free software; you can redistribute it
-#  and/or modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2 of the
-#  License, or (at your option) any later version.
+#  The IgH EtherCAT Master is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU General Public License version 2, as
+#  published by the Free Software Foundation.
 #
-#  The IgH EtherCAT Master is distributed in the hope that it will be
-#  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
+#  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+#  Public License for more details.
 #
-#  You should have received a copy of the GNU General Public License
-#  along with the IgH EtherCAT Master; if not, write to the Free Software
+#  You should have received a copy of the GNU General Public License along
+#  with the IgH EtherCAT Master; if not, write to the Free Software
 #  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
-#  The right to use EtherCAT Technology is granted and comes free of
-#  charge under condition of compatibility of product made by
-#  Licensee. People intending to distribute/sell products based on the
-#  code, have to sign an agreement to guarantee that products using
-#  software based on IgH EtherCAT master stay compatible with the actual
-#  EtherCAT specification (which are released themselves as an open
-#  standard) as the (only) precondition to have the right to use EtherCAT
-#  Technology, IP and trade marks.
+#  ---
+#  
+#  The license mentioned above concerns the source code only. Using the
+#  EtherCAT technology and brand is only permitted in compliance with the
+#  industrial property and similar rights of Beckhoff Automation GmbH.
 #
 #------------------------------------------------------------------------------
+
+ACLOCAL_AMFLAGS = -I m4
 
 SUBDIRS = \
     devices \
     include \
     master \
-    script \
-    tool
+    script
+
+if BUILD_TOOL
+SUBDIRS += tool
+endif
+
+if ENABLE_USERLIB
+SUBDIRS += lib
+endif
+
+if ENABLE_TTY
+SUBDIRS += tty
+endif
+
+if ENABLE_RTDM
+SUBDIRS += rtdm
+endif
+
+# userspace example depends on lib/
+SUBDIRS += examples
 
 DIST_SUBDIRS = \
     devices \
     examples \
     include \
+    lib \
+    m4 \
     master \
     script \
-    tool
+    tool \
+	rtdm \
+	tty
+
+noinst_HEADERS = \
+	globals.h
 
 EXTRA_DIST = \
-	Doxyfile \
+	Doxyfile.in \
 	FEATURES \
-	globals.h \
 	Kbuild.in \
-	README.EoE
+	README.EoE \
+	ethercat.spec \
+	ethercat.spec.in
 
 BUILT_SOURCES = \
-	Kbuild
+	Doxyfile \
+	Kbuild \
+	ethercat.spec
 
 modules:
 	$(MAKE) -C "$(LINUX_SOURCE_DIR)" M="@abs_srcdir@" modules
 
 modules_install:
-	$(MAKE) -C master modules_install
-	$(MAKE) -C devices modules_install
+	$(MAKE) -C "$(LINUX_SOURCE_DIR)" M="@abs_srcdir@" \
+		INSTALL_MOD_DIR="$(INSTALL_MOD_DIR)" modules_install
 
 clean-local:
 	$(MAKE) -C "$(LINUX_SOURCE_DIR)" M="@abs_srcdir@" clean
-	@rm -f Modules.symvers
 
 mydist:
-	svn2cl $(srcdir)
-	@SVNREV=`svnversion $(srcdir)` && \
-	  $(MAKE) dist-bzip2 \
-	  distdir=$(PACKAGE)-$(VERSION)-$(BRANCH)-r$${SVNREV}
+	hg log --style=changelog $(srcdir) > ChangeLog
+	@REV=`hg id -i $(srcdir)` && \
+		$(MAKE) dist-bzip2 distdir=$(PACKAGE)-$(VERSION)-$${REV}
 
 dist-hook:
-	if which svnversion >/dev/null 2>&1; then \
-		svnversion $(srcdir) 2>/dev/null >$(distdir)/svnrevision; \
+	if which hg >/dev/null 2>&1; then \
+		hg id -i $(srcdir) 2>/dev/null >$(distdir)/revision; \
 	fi
 
 mrproper: clean cleandoc
 	rm -rf \
+		*~ \
+		ChangeLog \
+		Doxyfile \
+		Kbuild \
+		Makefile \
+		Makefile.in \
+		TAGS \
 		aclocal.m4 \
 		autoconf \
 		autom4te.cache \
@@ -87,14 +118,10 @@ mrproper: clean cleandoc
 		config.h.in \
 		config.log \
 		config.status \
-		configure.in \
 		configure \
-		Makefile \
-		Makefile.in \
-		stamp-h1 \
-		ChangeLog \
-        Kbuild \
-		*~
+		configure.in \
+		libtool \
+		stamp-h1
 
 doc:
 	doxygen Doxyfile

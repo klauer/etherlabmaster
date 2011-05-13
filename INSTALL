@@ -4,38 +4,41 @@ This is the INSTALL file of the IgH EtherCAT Master.
 
 $Id$
 
+vim: set spelllang=en spell tw=78
+
 -------------------------------------------------------------------------------
 
 Building and installing
 =======================
 
-The build and installation procedure is described in section 2.1 in the
-documentation available from http://etherlab.org/en/ethercat.
+The complete build and installation procedure is described in the respective
+section of the documentation available from http://etherlab.org/en/ethercat.
 
 -------------------------------------------------------------------------------
 
 For the impatient: The procedure mainly consists of calling
 
+$ ./boostrap # to create the configure script, if downloaded from the repo
+
 $ ./configure
-$ make
-$ make modules
+$ make all modules
 
-(and as root)
+... and as root:
 
-# make install
-# make modules_install
+# make modules_install install
 # depmod
 
-...and linking the init script and copying the sysconfig file from $PREFIX/etc
+... and linking the init script and copying the sysconfig file from $PREFIX/etc
 to the appropriate locations and customizing the sysconfig file.
 
 # ln -s ${PREFIX}/etc/init.d/ethercat /etc/init.d/ethercat
 # cp ${PREFIX}/etc/sysconfig/ethercat /etc/sysconfig/ethercat
 # vi /etc/sysconfig/ethercat
 
-The EtherCAT character device will be created with mode 0660 and group root by
-default. If you want to give normal users reading access, create a udev rule
-like this:
+Make sure, that the 'udev' package is installed, to automatically create the
+EtherCAT character devices. The character devices will be created with mode
+0660 and group root by default. If you want to give normal users reading
+access, create a udev rule like this:
 
 # echo KERNEL==\"EtherCAT[0-9]*\", MODE=\"0664\" > /etc/udev/rules.d/99-EtherCAT.rules
 

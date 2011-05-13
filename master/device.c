@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -58,6 +54,12 @@
     } while (0)
 #endif
 
+/** List of intervals for frame statistics [s].
+ */
+static const unsigned int rate_intervals[] = {
+    1, 10, 60
+};
+
 /*****************************************************************************/
 
 /** Constructor.
@@ -69,6 +71,7 @@ int ec_device_init(
         ec_master_t *master /**< master owning the device */
         )
 {
+    int ret;
     unsigned int i;
     struct ethhdr *eth;
 #ifdef EC_DEBUG_IF
@@ -91,8 +94,9 @@ int ec_device_init(
 
     sprintf(ifname, "ecdbg%c%u", mb, master->index);
 
-    if (ec_debug_init(&device->dbg, ifname)) {
-        EC_ERR("Failed to init debug device!\n");
+    ret = ec_debug_init(&device->dbg, device, ifname);
+    if (ret < 0) {
+        EC_MASTER_ERR(master, "Failed to init debug device!\n");
         goto out_return;
     }
 #endif
@@ -102,7 +106,8 @@ int ec_device_init(
 
     for (i = 0; i < EC_TX_RING_SIZE; i++) {
         if (!(device->tx_skb[i] = dev_alloc_skb(ETH_FRAME_LEN))) {
-            EC_ERR("Error allocating device socket buffer!\n");
+            EC_MASTER_ERR(master, "Error allocating device socket buffer!\n");
+            ret = -ENOMEM;
             goto out_tx_ring;
         }
 
@@ -124,12 +129,12 @@ out_tx_ring:
     ec_debug_clear(&device->dbg);
 out_return:
 #endif
-    return -1;
+    return ret;
 }
 
 /*****************************************************************************/
 
-/** Destuctor.
+/** Destructor.
  */
 void ec_device_clear(
         ec_device_t *device /**< EtherCAT device */
@@ -170,6 +175,10 @@ void ec_device_attach(
         eth = (struct ethhdr *) (device->tx_skb[i]->data);
         memcpy(eth->h_source, net_dev->dev_addr, ETH_ALEN);
     }
+
+#ifdef EC_DEBUG_IF
+    ec_debug_register(&device->dbg, net_dev);
+#endif
 }
 
 /*****************************************************************************/
@@ -182,13 +191,18 @@ void ec_device_detach(
 {
     unsigned int i;
 
+#ifdef EC_DEBUG_IF
+    ec_debug_unregister(&device->dbg);
+#endif
+
     device->dev = NULL;
     device->poll = NULL;
     device->module = NULL;
     device->open = 0;
     device->link_state = 0; // down
-    device->tx_count = 0;
-    device->rx_count = 0;
+
+    ec_device_clear_stats(device);
+
     for (i = 0; i < EC_TX_RING_SIZE; i++)
         device->tx_skb[i]->dev = NULL;
 }
@@ -203,23 +217,31 @@ int ec_device_open(
         ec_device_t *device /**< EtherCAT device */
         )
 {
+    int ret;
+
     if (!device->dev) {
-        EC_ERR("No net_device to open!\n");
-        return -1;
+        EC_MASTER_ERR(device->master, "No net_device to open!\n");
+        return -ENODEV;
     }
 
     if (device->open) {
-        EC_WARN("Device already opened!\n");
+        EC_MASTER_WARN(device->master, "Device already opened!\n");
         return 0;
     }
 
     device->link_state = 0;
-    device->tx_count = 0;
-    device->rx_count = 0;
 
-    if (device->dev->open(device->dev) == 0) device->open = 1;
+    ec_device_clear_stats(device);
 
-    return device->open ? 0 : -1;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
+    ret = device->dev->netdev_ops->ndo_open(device->dev);
+#else
+    ret = device->dev->open(device->dev);
+#endif
+    if (!ret)
+        device->open = 1;
+
+    return ret;
 }
 
 /*****************************************************************************/
@@ -232,19 +254,27 @@ int ec_device_close(
         ec_device_t *device /**< EtherCAT device */
         )
 {
+    int ret;
+
     if (!device->dev) {
-        EC_ERR("No device to close!\n");
-        return -1;
+        EC_MASTER_ERR(device->master, "No device to close!\n");
+        return -ENODEV;
     }
 
     if (!device->open) {
-        EC_WARN("Device already closed!\n");
+        EC_MASTER_WARN(device->master, "Device already closed!\n");
         return 0;
     }
 
-    if (device->dev->stop(device->dev) == 0) device->open = 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
+    ret = device->dev->netdev_ops->ndo_stop(device->dev);
+#else
+    ret = device->dev->stop(device->dev);
+#endif
+    if (!ret)
+        device->open = 0;
 
-    return !device->open ? 0 : -1;
+    return ret;
 }
 
 /*****************************************************************************/
@@ -279,28 +309,83 @@ void ec_device_send(
 {
     struct sk_buff *skb = device->tx_skb[device->tx_ring_index];
 
-    if (unlikely(!device->link_state)) // Link down
-        return;
+    // frame statistics
+    if (unlikely(jiffies - device->stats_jiffies >= HZ)) {
+        unsigned int i;
+        u32 tx_frame_rate =
+            (u32) (device->tx_count - device->last_tx_count) * 1000;
+        u32 tx_byte_rate =
+            (device->tx_bytes - device->last_tx_bytes);
+        u64 loss = device->tx_count - device->rx_count;
+        s32 loss_rate = (s32) (loss - device->last_loss) * 1000;
+        for (i = 0; i < EC_RATE_COUNT; i++) {
+            unsigned int n = rate_intervals[i];
+            device->tx_frame_rates[i] =
+                (device->tx_frame_rates[i] * (n - 1) + tx_frame_rate) / n;
+            device->tx_byte_rates[i] =
+                (device->tx_byte_rates[i] * (n - 1) + tx_byte_rate) / n;
+            device->loss_rates[i] =
+                (device->loss_rates[i] * (n - 1) + loss_rate) / n;
+        }
+        device->last_tx_count = device->tx_count;
+        device->last_tx_bytes = device->tx_bytes;
+        device->last_loss = loss;
+        device->stats_jiffies = jiffies;
+    }
 
     // set the right length for the data
     skb->len = ETH_HLEN + size;
 
     if (unlikely(device->master->debug_level > 1)) {
-        EC_DBG("sending frame:\n");
-        ec_print_data(skb->data + ETH_HLEN, size);
+        EC_MASTER_DBG(device->master, 2, "Sending frame:\n");
+        ec_print_data(skb->data, ETH_HLEN + size);
     }
 
     // start sending
-    if (device->dev->hard_start_xmit(skb, device->dev) == NETDEV_TX_OK) {
-		device->tx_count++;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
+    if (device->dev->netdev_ops->ndo_start_xmit(skb, device->dev) ==
+            NETDEV_TX_OK)
+#else
+    if (device->dev->hard_start_xmit(skb, device->dev) == NETDEV_TX_OK)
+#endif
+    {
+        device->tx_count++;
+        device->tx_bytes += ETH_HLEN + size;
 #ifdef EC_DEBUG_IF
-		ec_debug_send(&device->dbg, skb->data, ETH_HLEN + size);
+        ec_debug_send(&device->dbg, skb->data, ETH_HLEN + size);
 #endif
 #ifdef EC_DEBUG_RING
-		ec_device_debug_ring_append(
-				device, TX, skb->data + ETH_HLEN, size);
+        ec_device_debug_ring_append(
+                device, TX, skb->data + ETH_HLEN, size);
 #endif
-	}
+    } else {
+        device->tx_errors++;
+    }
+}
+
+/*****************************************************************************/
+
+/** Clears the frame statistics.
+ */
+void ec_device_clear_stats(
+        ec_device_t *device /**< EtherCAT device */
+        )
+{
+    unsigned int i;
+
+    // zero frame statistics
+    device->tx_count = 0;
+    device->rx_count = 0;
+    device->tx_errors = 0;
+    device->tx_bytes = 0;
+    device->last_tx_count = 0;
+    device->last_tx_bytes = 0;
+    device->last_loss = 0;
+    for (i = 0; i < EC_RATE_COUNT; i++) {
+        device->tx_frame_rates[i] = 0;
+        device->tx_byte_rates[i] = 0;
+        device->loss_rates[i] = 0;
+    }
 }
 
 /*****************************************************************************/
@@ -349,7 +434,7 @@ void ec_device_debug_ring_print(
         % EC_DEBUG_RING_SIZE;
     t0 = device->debug_frames[ring_index].t;
 
-    EC_DBG("Debug ring %u:\n", ring_index);
+    EC_MASTER_DBG(device->master, 1, "Debug ring %u:\n", ring_index);
 
     // calculate index of the oldest frame in the ring
     ring_index = (device->debug_frame_index + EC_DEBUG_RING_SIZE
@@ -359,7 +444,7 @@ void ec_device_debug_ring_print(
         df = &device->debug_frames[ring_index];
         timersub(&t0, &df->t, &diff);
 
-        EC_DBG("Frame %u, dt=%u.%06u s, %s:\n",
+        EC_MASTER_DBG(device->master, 1, "Frame %u, dt=%u.%06u s, %s:\n",
                 i + 1 - device->debug_frame_count,
                 (unsigned int) diff.tv_sec,
                 (unsigned int) diff.tv_usec,
@@ -414,11 +499,11 @@ void ecdev_withdraw(ec_device_t *device /**< EtherCAT device */)
     char str[20];
 
     ec_mac_print(device->dev->dev_addr, str);
-    EC_INFO("Master %u releasing main device %s.\n", master->index, str);
+    EC_MASTER_INFO(master, "Releasing main device %s.\n", str);
     
-    down(&master->device_sem);
+    ec_mutex_lock(&master->device_mutex);
     ec_device_detach(device);
-    up(&master->device_sem);
+    ec_mutex_unlock(&master->device_mutex);
 }
 
 /*****************************************************************************/
@@ -430,14 +515,18 @@ void ecdev_withdraw(ec_device_t *device /**< EtherCAT device */)
  */
 int ecdev_open(ec_device_t *device /**< EtherCAT device */)
 {
-    if (ec_device_open(device)) {
-        EC_ERR("Failed to open device!\n");
-        return -1;
+    int ret;
+
+    ret = ec_device_open(device);
+    if (ret) {
+        EC_MASTER_ERR(device->master, "Failed to open device!\n");
+        return ret;
     }
 
-    if (ec_master_enter_idle_phase(device->master)) {
-        EC_ERR("Failed to enter IDLE phase!\n");
-        return -1;
+    ret = ec_master_enter_idle_phase(device->master);
+    if (ret) {
+        EC_MASTER_ERR(device->master, "Failed to enter IDLE phase!\n");
+        return ret;
     }
 
     return 0;
@@ -455,7 +544,7 @@ void ecdev_close(ec_device_t *device /**< EtherCAT device */)
     ec_master_leave_idle_phase(device->master);
 
     if (ec_device_close(device))
-        EC_WARN("Failed to close device!\n");
+        EC_MASTER_WARN(device->master, "Failed to close device!\n");
 }
 
 /*****************************************************************************/
@@ -475,11 +564,18 @@ void ecdev_receive(
 {
     const void *ec_data = data + ETH_HLEN;
     size_t ec_size = size - ETH_HLEN;
+
+    if (unlikely(!data)) {
+        EC_MASTER_WARN(device->master, "%s() called with NULL data.\n",
+                __func__);
+        return;
+    }
+
     device->rx_count++;
 
     if (unlikely(device->master->debug_level > 1)) {
-        EC_DBG("Received frame:\n");
-        ec_print_data(ec_data, ec_size);
+        EC_MASTER_DBG(device->master, 2, "Received frame:\n");
+        ec_print_data(data, size);
     }
 
 #ifdef EC_DEBUG_IF
@@ -507,13 +603,14 @@ void ecdev_set_link(
         )
 {
     if (unlikely(!device)) {
-        EC_WARN("ecdev_set_link(): No device!\n");
+        EC_MASTER_WARN(device->master, "ecdev_set_link(): No device!\n");
         return;
     }
 
     if (likely(state != device->link_state)) {
         device->link_state = state;
-        EC_INFO("Link state changed to %s.\n", (state ? "UP" : "DOWN"));
+        EC_MASTER_INFO(device->master,
+                "Link state changed to %s.\n", (state ? "UP" : "DOWN"));
     }
 }
 
@@ -528,7 +625,7 @@ uint8_t ecdev_get_link(
         )
 {
     if (unlikely(!device)) {
-        EC_WARN("ecdev_get_link(): No device!\n");
+        EC_MASTER_WARN(device->master, "ecdev_get_link(): No device!\n");
         return 0;
     }
 

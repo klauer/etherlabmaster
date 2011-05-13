@@ -2,32 +2,28 @@
 #
 #  $Id$
 #
-#  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+#  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
 #
 #  This file is part of the IgH EtherCAT Master.
 #
-#  The IgH EtherCAT Master is free software; you can redistribute it
-#  and/or modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2 of the
-#  License, or (at your option) any later version.
+#  The IgH EtherCAT Master is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU General Public License version 2, as
+#  published by the Free Software Foundation.
 #
-#  The IgH EtherCAT Master is distributed in the hope that it will be
-#  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
+#  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+#  Public License for more details.
 #
-#  You should have received a copy of the GNU General Public License
-#  along with the IgH EtherCAT Master; if not, write to the Free Software
+#  You should have received a copy of the GNU General Public License along
+#  with the IgH EtherCAT Master; if not, write to the Free Software
 #  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
-#  The right to use EtherCAT Technology is granted and comes free of
-#  charge under condition of compatibility of product made by
-#  Licensee. People intending to distribute/sell products based on the
-#  code, have to sign an agreement to guarantee that products using
-#  software based on IgH EtherCAT master stay compatible with the actual
-#  EtherCAT specification (which are released themselves as an open
-#  standard) as the (only) precondition to have the right to use EtherCAT
-#  Technology, IP and trade marks.
+#  ---
+#  
+#  The license mentioned above concerns the source code only. Using the
+#  EtherCAT technology and brand is only permitted in compliance with the
+#  industrial property and similar rights of Beckhoff Automation GmbH.
 #
 #------------------------------------------------------------------------------
 
@@ -44,6 +40,14 @@ EXTRA_DIST = \
 	e1000-2.6.22-orig.h \
 	e1000-2.6.24-ethercat.h \
 	e1000-2.6.24-orig.h \
+	e1000-2.6.26-ethercat.h \
+	e1000-2.6.26-orig.h \
+	e1000-2.6.27-ethercat.h \
+	e1000-2.6.27-orig.h \
+	e1000-2.6.28-ethercat.h \
+	e1000-2.6.28-orig.h \
+	e1000-2.6.33-ethercat.h \
+	e1000-2.6.33-orig.h \
 	e1000_ethtool-2.6.13-ethercat.c \
 	e1000_ethtool-2.6.13-orig.c \
 	e1000_ethtool-2.6.18-ethercat.c \
@@ -54,6 +58,14 @@ EXTRA_DIST = \
 	e1000_ethtool-2.6.22-orig.c \
 	e1000_ethtool-2.6.24-ethercat.c \
 	e1000_ethtool-2.6.24-orig.c \
+	e1000_ethtool-2.6.26-ethercat.c \
+	e1000_ethtool-2.6.26-orig.c \
+	e1000_ethtool-2.6.27-ethercat.c \
+	e1000_ethtool-2.6.27-orig.c \
+	e1000_ethtool-2.6.28-ethercat.c \
+	e1000_ethtool-2.6.28-orig.c \
+	e1000_ethtool-2.6.33-ethercat.c \
+	e1000_ethtool-2.6.33-orig.c \
 	e1000_hw-2.6.13-ethercat.c \
 	e1000_hw-2.6.13-ethercat.h \
 	e1000_hw-2.6.13-orig.c \
@@ -74,6 +86,22 @@ EXTRA_DIST = \
 	e1000_hw-2.6.24-ethercat.h \
 	e1000_hw-2.6.24-orig.c \
 	e1000_hw-2.6.24-orig.h \
+	e1000_hw-2.6.26-ethercat.c \
+	e1000_hw-2.6.26-ethercat.h \
+	e1000_hw-2.6.26-orig.c \
+	e1000_hw-2.6.26-orig.h \
+	e1000_hw-2.6.27-ethercat.c \
+	e1000_hw-2.6.27-ethercat.h \
+	e1000_hw-2.6.27-orig.c \
+	e1000_hw-2.6.27-orig.h \
+	e1000_hw-2.6.28-ethercat.c \
+	e1000_hw-2.6.28-ethercat.h \
+	e1000_hw-2.6.28-orig.c \
+	e1000_hw-2.6.28-orig.h \
+	e1000_hw-2.6.33-ethercat.c \
+	e1000_hw-2.6.33-ethercat.h \
+	e1000_hw-2.6.33-orig.c \
+	e1000_hw-2.6.33-orig.h \
 	e1000_main-2.6.13-ethercat.c \
 	e1000_main-2.6.13-orig.c \
 	e1000_main-2.6.18-ethercat.c \
@@ -84,6 +112,14 @@ EXTRA_DIST = \
 	e1000_main-2.6.22-orig.c \
 	e1000_main-2.6.24-ethercat.c \
 	e1000_main-2.6.24-orig.c \
+	e1000_main-2.6.26-ethercat.c \
+	e1000_main-2.6.26-orig.c \
+	e1000_main-2.6.27-ethercat.c \
+	e1000_main-2.6.27-orig.c \
+	e1000_main-2.6.28-ethercat.c \
+	e1000_main-2.6.28-orig.c \
+	e1000_main-2.6.33-ethercat.c \
+	e1000_main-2.6.33-orig.c \
 	e1000_osdep-2.6.13-ethercat.h \
 	e1000_osdep-2.6.13-orig.h \
 	e1000_osdep-2.6.18-ethercat.h \
@@ -94,6 +130,14 @@ EXTRA_DIST = \
 	e1000_osdep-2.6.22-orig.h \
 	e1000_osdep-2.6.24-ethercat.h \
 	e1000_osdep-2.6.24-orig.h \
+	e1000_osdep-2.6.26-ethercat.h \
+	e1000_osdep-2.6.26-orig.h \
+	e1000_osdep-2.6.27-ethercat.h \
+	e1000_osdep-2.6.27-orig.h \
+	e1000_osdep-2.6.28-ethercat.h \
+	e1000_osdep-2.6.28-orig.h \
+	e1000_osdep-2.6.33-ethercat.h \
+	e1000_osdep-2.6.33-orig.h \
 	e1000_param-2.6.13-ethercat.c \
 	e1000_param-2.6.13-orig.c \
 	e1000_param-2.6.18-ethercat.c \
@@ -103,19 +147,26 @@ EXTRA_DIST = \
 	e1000_param-2.6.22-ethercat.c \
 	e1000_param-2.6.22-orig.c \
 	e1000_param-2.6.24-ethercat.c \
-	e1000_param-2.6.24-orig.c
+	e1000_param-2.6.24-orig.c \
+	e1000_param-2.6.26-ethercat.c \
+	e1000_param-2.6.26-orig.c \
+	e1000_param-2.6.27-ethercat.c \
+	e1000_param-2.6.27-orig.c \
+	e1000_param-2.6.28-ethercat.c \
+	e1000_param-2.6.28-orig.c
+	e1000_param-2.6.33-ethercat.c \
+	e1000_param-2.6.33-orig.c
+
 
 BUILT_SOURCES = \
 	Kbuild
 
 modules:
-	$(MAKE) -C "@abs_top_srcdir@" modules
+	$(MAKE) -C "$(LINUX_SOURCE_DIR)" M="@abs_srcdir@" modules
 
 modules_install:
-	mkdir -p $(DESTDIR)$(LINUX_MOD_PATH)
-if ENABLE_E1000
-	cp $(srcdir)/ec_e1000.ko $(DESTDIR)$(LINUX_MOD_PATH)
-endif
+	$(MAKE) -C "$(LINUX_SOURCE_DIR)" M="@abs_srcdir@" \
+		INSTALL_MOD_DIR="$(INSTALL_MOD_DIR)" modules_install
 
 clean-local:
 	$(MAKE) -C "$(LINUX_SOURCE_DIR)" M="@abs_srcdir@" clean

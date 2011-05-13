@@ -5,11 +5,14 @@
 #-----------------------------------------------------------------------------
 
 GRAPHS := \
+	fsm_change \
+	fsm_eoe \
 	fsm_master \
 	fsm_pdo_conf \
-	fsm_pdo_read \
 	fsm_pdo_entry_conf \
 	fsm_pdo_entry_read \
+	fsm_pdo_read \
+	fsm_sii \
 	fsm_slave_conf \
 	fsm_slave_scan
 
@@ -20,13 +23,17 @@ PDF = $(addsuffix .pdf,$(GRAPHS))
 
 #-----------------------------------------------------------------------------
 
-all: $(PDF)
+all: pdf
+
+pdf: $(PDF)
+
+ps: $(PS)
 
 %.ps: %.dot
 	dot -Tps -o $@ $<
 
 %.pdf: %.ps
-	ps2pdf $<
+	epstopdf $<
 
 clean:
 	@rm -f *.ps *.pdf

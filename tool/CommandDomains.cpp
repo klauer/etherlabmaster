@@ -1,6 +1,29 @@
 /*****************************************************************************
  *
- * $Id$
+ *  $Id$
+ *
+ *  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+ *
+ *  This file is part of the IgH EtherCAT Master.
+ *
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
+ *
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  ****************************************************************************/
 
@@ -9,6 +32,7 @@
 using namespace std;
 
 #include "CommandDomains.h"
+#include "MasterDevice.h"
 
 /*****************************************************************************/
 
@@ -19,87 +43,110 @@ CommandDomains::CommandDomains():
 
 /*****************************************************************************/
 
-string CommandDomains::helpString() const
+string CommandDomains::helpString(const string &binaryBaseName) const
 {
     stringstream str;
 
-	str << getName() << " [OPTIONS]" << endl
-    	<< endl
-    	<< getBriefDescription() << endl
+    str << binaryBaseName << " " << getName() << " [OPTIONS]" << endl
         << endl
-    	<< "Without the --verbose option, the domains are displayed" << endl
+        << getBriefDescription() << endl
+        << endl
+        << "Without the --verbose option, the domains are displayed" << endl
         << "one-per-line. Example:" << endl
-    	<< endl
-    	<< "Domain0: LogBaseAddr 0x00000000, Size   6, WorkingCounter 0/1"
-		<< endl << endl
-    	<< "The domain's base address for the logical datagram" << endl
-    	<< "(LRD/LWR/LRW) is displayed followed by the domain's" << endl
-    	<< "process data size in byte. The last values are the current" << endl
-    	<< "datagram working counter sum and the expected working" << endl
-    	<< "counter sum. If the values are equal, all Pdos were" << endl
+        << endl
+        << "Domain0: LogBaseAddr 0x00000000, Size   6, WorkingCounter 0/1"
+        << endl << endl
+        << "The domain's base address for the logical datagram" << endl
+        << "(LRD/LWR/LRW) is displayed followed by the domain's" << endl
+        << "process data size in byte. The last values are the current" << endl
+        << "datagram working counter sum and the expected working" << endl
+        << "counter sum. If the values are equal, all PDOs were" << endl
         << "exchanged during the last cycle." << endl
         << endl
-    	<< "If the --verbose option is given, the participating slave" << endl
-    	<< "configurations/FMMUs and the current process data are" << endl
-    	<< "additionally displayed:" << endl
-    	<< endl
-    	<< "Domain1: LogBaseAddr 0x00000006, Size   6, WorkingCounter 0/1"
-		<< endl
-    	<< "  SlaveConfig 1001:0, SM3 ( Input), LogAddr 0x00000006, Size 6"
-		<< endl
-    	<< "    0x00 0x00 0x00 0x00 0x00 0x00" << endl
-    	<< endl
-    	<< "The process data are displayed as hexadecimal bytes." << endl
-    	<< endl
-    	<< "Command-specific options:" << endl
-    	<< "  --domain  -d <index>  Positive numerical domain index." << endl
-    	<< "                        If ommitted, all domains are" << endl
+        << "If the --verbose option is given, the participating slave" << endl
+        << "configurations/FMMUs and the current process data are" << endl
+        << "additionally displayed:" << endl
+        << endl
+        << "Domain1: LogBaseAddr 0x00000006, Size   6, WorkingCounter 0/1"
+        << endl
+        << "  SlaveConfig 1001:0, SM3 ( Input), LogAddr 0x00000006, Size 6"
+        << endl
+        << "    00 00 00 00 00 00" << endl
+        << endl
+        << "The process data are displayed as hexadecimal bytes." << endl
+        << endl
+        << "Command-specific options:" << endl
+        << "  --domain  -d <index>  Positive numerical domain index." << endl
+        << "                        If ommitted, all domains are" << endl
         << "                        displayed." << endl
-		<< endl
-    	<< "  --verbose -v          Show FMMUs and process data" << endl
-		<< "                        in addition." << endl
-    	<< endl
-		<< numericInfo();
+        << endl
+        << "  --verbose -v          Show FMMUs and process data" << endl
+        << "                        in addition." << endl
+        << endl
+        << numericInfo();
 
-	return str.str();
+    return str.str();
 }
 
 /****************************************************************************/
 
-void CommandDomains::execute(MasterDevice &m, const StringVector &args)
+void CommandDomains::execute(const StringVector &args)
 {
-	DomainList domains;
-	DomainList::const_iterator di;
-	
-    m.open(MasterDevice::Read);
-	domains = selectedDomains(m);
+	MasterIndexList masterIndices;
+    bool doIndent;
+    DomainList domains;
+    DomainList::const_iterator di;
 
-	for (di = domains.begin(); di != domains.end(); di++) {
-		showDomain(m, *di);
-	}
+    if (args.size()) {
+        stringstream err;
+        err << "'" << getName() << "' takes no arguments!";
+        throwInvalidUsageException(err);
+    }
+
+	masterIndices = getMasterIndices();
+    doIndent = masterIndices.size() > 1;
+    MasterIndexList::const_iterator mi;
+    for (mi = masterIndices.begin();
+            mi != masterIndices.end(); mi++) {
+        MasterDevice m(*mi);
+        m.open(MasterDevice::Read);
+        domains = selectedDomains(m);
+
+        if (domains.size() && doIndent) {
+            cout << "Master" << dec << *mi << endl;
+        }
+
+        for (di = domains.begin(); di != domains.end(); di++) {
+            showDomain(m, *di, doIndent);
+        }
+    }
 }
 
 /****************************************************************************/
 
 void CommandDomains::showDomain(
-		MasterDevice &m,
-		const ec_ioctl_domain_t &domain
-		)
+        MasterDevice &m,
+        const ec_ioctl_domain_t &domain,
+        bool doIndent
+        )
 {
     unsigned char *processData;
     ec_ioctl_domain_data_t data;
     unsigned int i, j;
     ec_ioctl_domain_fmmu_t fmmu;
     unsigned int dataOffset;
-    
-	cout << "Domain" << dec << domain.index << ":"
-		<< " LogBaseAddr 0x"
-		<< hex << setfill('0')
+    string indent(doIndent ? "  " : "");
+
+    cout << indent << "Domain" << dec << domain.index << ":"
+        << " LogBaseAddr 0x"
+        << hex << setfill('0')
         << setw(8) << domain.logical_base_address
-		<< ", Size " << dec << setfill(' ')
+        << ", Size " << dec << setfill(' ')
         << setw(3) << domain.data_size
-		<< ", WorkingCounter "
-		<< domain.working_counter << "/"
+        << ", TxSize " << dec << setfill(' ')
+        << setw(3) << domain.tx_size
+        << ", WorkingCounter "
+        << domain.working_counter << "/"
         << domain.expected_working_counter << endl;
 
     if (!domain.data_size || getVerbosity() != Verbose)
@@ -117,7 +164,7 @@ void CommandDomains::showDomain(
     for (i = 0; i < domain.fmmu_count; i++) {
         m.getFmmu(&fmmu, domain.index, i);
 
-        cout << "  SlaveConfig "
+        cout << indent << "  SlaveConfig "
             << dec << fmmu.slave_config_alias
             << ":" << fmmu.slave_config_position
             << ", SM" << (unsigned int) fmmu.sync_index << " ("
@@ -128,7 +175,7 @@ void CommandDomains::showDomain(
             << setw(8) << fmmu.logical_address
             << ", Size " << dec << fmmu.data_size << endl;
 
-        dataOffset = fmmu.logical_address - domain.logical_base_address;
+        dataOffset = fmmu.domain_address - domain.logical_base_address;
         if (dataOffset + fmmu.data_size > domain.data_size) {
             stringstream err;
             delete [] processData;
@@ -136,11 +183,11 @@ void CommandDomains::showDomain(
             throwCommandException(err);
         }
 
-        cout << "    " << hex << setfill('0');
+        cout << indent << "    " << hex << setfill('0');
         for (j = 0; j < fmmu.data_size; j++) {
             if (j && !(j % BreakAfterBytes))
-                cout << endl << "    ";
-            cout << "0x" << setw(2)
+                cout << endl << indent << "    ";
+            cout << setw(2)
                 << (unsigned int) *(processData + dataOffset + j) << " ";
         }
         cout << endl;

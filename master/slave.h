@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -44,13 +40,131 @@
 #include <linux/list.h>
 #include <linux/kobject.h>
 
-#include "../include/ecrt.h"
-
 #include "globals.h"
 #include "datagram.h"
 #include "pdo.h"
 #include "sync.h"
 #include "sdo.h"
+#include "fsm_slave.h"
+#include "mailbox.h"
+
+/*****************************************************************************/
+
+/** Convenience macro for printing slave-specific information to syslog.
+ *
+ * This will print the message in \a fmt with a prefixed
+ * "EtherCAT <INDEX>-<POSITION>: ", where INDEX is the master index and
+ * POSITION is the slave's ring position.
+ *
+ * \param slave EtherCAT slave
+ * \param fmt format string (like in printf())
+ * \param args arguments (optional)
+ */
+#ifdef USE_TRACE_PRINTK
+#define EC_SLAVE_INFO(slave, fmt, args...) \
+    do { \
+        __trace_printk(_THIS_IP_,"EtherCAT %u-%u: " fmt, slave->master->index, \
+                slave->ring_position, ##args); \
+        printk(KERN_INFO "EtherCAT %u-%u: " fmt, slave->master->index, \
+                slave->ring_position, ##args);  \
+    } while (0)
+#else
+#define EC_SLAVE_INFO(slave, fmt, args...) \
+    printk(KERN_INFO "EtherCAT %u-%u: " fmt, slave->master->index, \
+            slave->ring_position, ##args)
+#endif
+
+/** Convenience macro for printing slave-specific errors to syslog.
+ *
+ * This will print the message in \a fmt with a prefixed
+ * "EtherCAT <INDEX>-<POSITION>: ", where INDEX is the master index and
+ * POSITION is the slave's ring position.
+ *
+ * \param slave EtherCAT slave
+ * \param fmt format string (like in printf())
+ * \param args arguments (optional)
+ */
+#ifdef USE_TRACE_PRINTK
+#define EC_SLAVE_ERR(slave, fmt, args...) \
+    do { \
+        __trace_printk(_THIS_IP_,"EtherCAT ERROR %u-%u: " fmt, slave->master->index, \
+                slave->ring_position, ##args); \
+        printk(KERN_ERR "EtherCAT ERROR %u-%u: " fmt, slave->master->index, \
+                slave->ring_position, ##args);  \
+    } while (0)
+#else
+#define EC_SLAVE_ERR(slave, fmt, args...) \
+    printk(KERN_ERR "EtherCAT ERROR %u-%u: " fmt, slave->master->index, \
+            slave->ring_position, ##args)
+#endif
+
+/** Convenience macro for printing slave-specific warnings to syslog.
+ *
+ * This will print the message in \a fmt with a prefixed
+ * "EtherCAT <INDEX>-<POSITION>: ", where INDEX is the master index and
+ * POSITION is the slave's ring position.
+ *
+ * \param slave EtherCAT slave
+ * \param fmt format string (like in printf())
+ * \param args arguments (optional)
+ */
+#ifdef USE_TRACE_PRINTK
+#define EC_SLAVE_WARN(slave, fmt, args...) \
+    do { \
+        __trace_printk(_THIS_IP_,"EtherCAT WARNING %u-%u: " fmt, \
+                slave->master->index, slave->ring_position, ##args); \
+        printk(KERN_WARNING "EtherCAT WARNING %u-%u: " fmt, \
+                slave->master->index, slave->ring_position, ##args);    \
+    } while (0)
+#else
+#define EC_SLAVE_WARN(slave, fmt, args...) \
+    printk(KERN_WARNING "EtherCAT WARNING %u-%u: " fmt, \
+            slave->master->index, slave->ring_position, ##args)
+#endif
+
+/** Convenience macro for printing slave-specific debug messages to syslog.
+ *
+ * This will print the message in \a fmt with a prefixed
+ * "EtherCAT <INDEX>-<POSITION>: ", where INDEX is the master index and
+ * POSITION is the slave's ring position.
+ *
+ * \param slave EtherCAT slave
+ * \param fmt format string (like in printf())
+ * \param args arguments (optional)
+ */
+#ifdef USE_TRACE_PRINTK
+#define EC_SLAVE_DBG(slave, level, fmt, args...) \
+    do { \
+        __trace_printk(_THIS_IP_,"EtherCAT DEBUG%u %u-%u: " fmt, \
+            level,slave->master->index, slave->ring_position, ##args); \
+        if (slave->master->debug_level >= level) { \
+            printk(KERN_DEBUG "EtherCAT DEBUG %u-%u: " fmt, \
+                    slave->master->index, slave->ring_position, ##args); \
+        } \
+    } while (0)
+#else
+#define EC_SLAVE_DBG(slave, level, fmt, args...) \
+    do { \
+        if (slave->master->debug_level >= level) { \
+            printk(KERN_DEBUG "EtherCAT DEBUG %u-%u: " fmt, \
+                    slave->master->index, slave->ring_position, ##args); \
+        } \
+    } while (0)
+#endif
+
+/*****************************************************************************/
+
+/** Slave port.
+ */
+typedef struct {
+    ec_slave_port_desc_t desc; /**< Port descriptors. */
+    ec_slave_port_link_t link; /**< Port link status. */
+    ec_slave_t *next_slave; /**< Connected slaves. */
+    uint32_t receive_time; /**< Port receive times for delay
+                                            measurement. */
+    uint32_t delay_to_next_dc; /**< Delay to next slave with DC support behind
+                                 this port [ns]. */
+} ec_slave_port_t;
 
 /*****************************************************************************/
 
@@ -63,10 +177,14 @@ typedef struct {
     uint32_t product_code; /**< Vendor-specific product code. */
     uint32_t revision_number; /**< Revision number. */
     uint32_t serial_number; /**< Serial number. */
-    uint16_t rx_mailbox_offset; /**< Mailbox address (master to slave). */
-    uint16_t rx_mailbox_size; /**< Mailbox size (master to slave). */
-    uint16_t tx_mailbox_offset; /**< Mailbox address (slave to master). */
-    uint16_t tx_mailbox_size; /**< Mailbox size (slave to master). */
+    uint16_t boot_rx_mailbox_offset; /**< Bootstrap receive mailbox address. */
+    uint16_t boot_rx_mailbox_size; /**< Bootstrap receive mailbox size. */
+    uint16_t boot_tx_mailbox_offset; /**< Bootstrap transmit mailbox address. */
+    uint16_t boot_tx_mailbox_size; /**< Bootstrap transmit mailbox size. */
+    uint16_t std_rx_mailbox_offset; /**< Standard receive mailbox address. */
+    uint16_t std_rx_mailbox_size; /**< Standard receive mailbox size. */
+    uint16_t std_tx_mailbox_offset; /**< Standard transmit mailbox address. */
+    uint16_t std_tx_mailbox_size; /**< Standard transmit mailbox size. */
     uint16_t mailbox_protocols; /**< Supported mailbox protocols. */
 
     // Strings
@@ -94,16 +212,6 @@ typedef struct {
 
 /*****************************************************************************/
 
-/** EtherCAT slave port information.
- */
-typedef struct {
-    uint8_t dl_link; /**< Link detected. */
-    uint8_t dl_loop; /**< Loop closed. */
-    uint8_t dl_signal; /**< Detected signal on RX port. */
-} ec_slave_port_t;
-
-/*****************************************************************************/
-
 /** EtherCAT slave.
  */
 struct ec_slave
@@ -113,6 +221,9 @@ struct ec_slave
     // addresses
     uint16_t ring_position; /**< Ring position. */
     uint16_t station_address; /**< Configured station address. */
+    uint16_t effective_alias; /**< Effective alias address. */
+
+    ec_slave_port_t ports[EC_MAX_PORTS]; /**< Ports. */
 
     // configuration
     ec_slave_config_t *config; /**< Current configuration. */
@@ -120,15 +231,28 @@ struct ec_slave
     ec_slave_state_t current_state; /**< Current application state. */
     unsigned int error_flag; /**< Stop processing after an error. */
     unsigned int force_config; /**< Force (re-)configuration. */
+    uint16_t configured_rx_mailbox_offset; /**< Configured receive mailbox
+                                             offset. */
+    uint16_t configured_rx_mailbox_size; /**< Configured receive mailbox size.
+                                          */
+    uint16_t configured_tx_mailbox_offset; /**< Configured send mailbox
+                                             offset. */
+    uint16_t configured_tx_mailbox_size; /**< Configured send mailbox size. */
 
     // base data
     uint8_t base_type; /**< Slave type. */
     uint8_t base_revision; /**< Revision. */
     uint16_t base_build; /**< Build number. */
-    uint16_t base_fmmu_count; /**< Number of supported FMMUs. */
-
-    // data link status
-    ec_slave_port_t ports[EC_MAX_PORTS]; /**< Port link status. */
+    uint8_t base_fmmu_count; /**< Number of supported FMMUs. */
+    uint8_t base_sync_count; /**< Number of supported sync managers. */
+    uint8_t base_fmmu_bit_operation; /**< FMMU bit operation is supported. */
+    uint8_t base_dc_supported; /**< Distributed clocks are supported. */
+    ec_slave_dc_range_t base_dc_range; /**< DC range. */
+    uint8_t has_dc_system_time; /**< The slave supports the DC system time
+                                  register. Otherwise it can only be used for
+                                  delay measurement. */
+    uint32_t transmission_delay; /**< DC system time transmission delay
+                                   (offset from reference clock). */
 
     // SII
     uint16_t *sii_words; /**< Complete SII image. */
@@ -137,9 +261,22 @@ struct ec_slave
     // Slave information interface
     ec_sii_t sii; /**< Extracted SII data. */
 
-    struct list_head sdo_dictionary; /**< Sdo dictionary list */
+    struct list_head sdo_dictionary; /**< SDO dictionary list */
     uint8_t sdo_dictionary_fetched; /**< Dictionary has been fetched. */
     unsigned long jiffies_preop; /**< Time, the slave went to PREOP. */
+
+    struct list_head slave_sdo_requests; /**< SDO access requests. */
+    wait_queue_head_t sdo_queue; /**< Wait queue for SDO access requests
+                                   from user space. */
+    struct list_head foe_requests; /**< FoE write requests. */
+    wait_queue_head_t foe_queue; /**< Wait queue for FoE requests from user
+                                   space. */
+    struct list_head soe_requests; /**< FoE write requests. */
+    wait_queue_head_t soe_queue; /**< Wait queue for SoE requests from user
+                                   space. */
+    ec_fsm_slave_t fsm; /**< Slave state machine. */
+    ec_datagram_t datagram; /** Datagram used for data transfers */
+    ec_mailbox_t mbox; /**< Mailbox used for data transfers. */
 };
 
 /*****************************************************************************/
@@ -171,6 +308,9 @@ const ec_sdo_t *ec_slave_get_sdo_by_pos_const(const ec_slave_t *, uint16_t);
 uint16_t ec_slave_sdo_count(const ec_slave_t *);
 const ec_pdo_t *ec_slave_find_pdo(const ec_slave_t *, uint16_t);
 void ec_slave_attach_pdo_names(ec_slave_t *);
+
+void ec_slave_calc_port_delays(ec_slave_t *);
+void ec_slave_calc_transmission_delays_rec(ec_slave_t *, uint32_t *);
 
 /*****************************************************************************/
 

@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -40,24 +36,40 @@
 #ifndef __EC_MASTER_GLOBALS_H__
 #define __EC_MASTER_GLOBALS_H__
 
-#include <linux/types.h>
-
 #include "../globals.h"
+#include "../include/ecrt.h"
+
+#ifdef __KERNEL__
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
+#include <linux/rtmutex.h>
+#endif  // KERNEL_VERSION(2,6,24)
+#endif // __KERNEL__
+
+#ifdef CONFIG_TRACING
+//#define USE_TRACE_PRINTK
+#endif
 
 /******************************************************************************
  * EtherCAT master
  *****************************************************************************/
 
-/** Clock frequency for the EoE state machines. */
-#define EC_EOE_FREQUENCY 1000
-
 /** Datagram timeout in microseconds. */
 #define EC_IO_TIMEOUT 500
+
+/** FSM injection timeout in microseconds. */
+#define EC_FSM_INJECTION_TIMEOUT 10000
+
+/** Time to send a byte in nanoseconds.
+ *
+ * t_ns = 1 / (100 MBit/s / 8 bit/byte) = 80 ns/byte
+ */
+#define EC_BYTE_TRANSMISSION_TIME_NS 80
 
 /** Number of state machine retries on datagram timeout. */
 #define EC_FSM_RETRIES 3
 
-/** Seconds to wait before fetching Sdo dictionary
+/** Seconds to wait before fetching SDO dictionary
     after slave entered PREOP state. */
 #define EC_WAIT_SDO_DICT 3
 
@@ -65,7 +77,10 @@
 #define EC_STATE_STRING_SIZE 32
 
 /** Maximum SII size in words, to avoid infinite reading. */
-#define EC_MAX_SII_SIZE 1024
+#define EC_MAX_SII_SIZE 4096
+
+/** Number of statistic rate intervals to maintain. */
+#define EC_RATE_COUNT 3
 
 /******************************************************************************
  * EtherCAT protocol
@@ -87,11 +102,11 @@
 #define EC_MAX_DATA_SIZE (ETH_DATA_LEN - EC_FRAME_HEADER_SIZE \
                           - EC_DATAGRAM_HEADER_SIZE - EC_DATAGRAM_FOOTER_SIZE)
 
+/** Mailbox header size.  */
+#define EC_MBOX_HEADER_SIZE 6
+
 /** Word offset of first SII category. */
 #define EC_FIRST_SII_CATEGORY_OFFSET 0x40
-
-/** Maximum number of slave ports. */
-#define EC_MAX_PORTS 4
 
 /** Size of a sync manager configuration page. */
 #define EC_SYNC_PAGE_SIZE 8
@@ -101,6 +116,15 @@
 
 /** Size of an FMMU configuration page. */
 #define EC_FMMU_PAGE_SIZE 16
+
+/** Number of DC sync signals. */
+#define EC_SYNC_SIGNAL_COUNT 2
+
+/** Size of the datagram description string.
+ *
+ * This is also used as the maximum lenth of EoE device names.
+ **/
+#define EC_DATAGRAM_NAME_SIZE 20
 
 /** Slave state mask.
  *
@@ -118,6 +142,8 @@ typedef enum {
     /**< INIT state (no mailbox communication, no IO) */
     EC_SLAVE_STATE_PREOP = 0x02,
     /**< PREOP state (mailbox communication, no IO) */
+    EC_SLAVE_STATE_BOOT = 0x03,
+    /**< Bootstrap state (mailbox communication, firmware update) */
     EC_SLAVE_STATE_SAFEOP = 0x04,
     /**< SAFEOP (mailbox communication and input update) */
     EC_SLAVE_STATE_OP = 0x08,
@@ -129,21 +155,21 @@ typedef enum {
 /** Supported mailbox protocols.
  */
 enum {
-    EC_MBOX_AOE = 0x01, /**< ADS-over-EtherCAT */
-    EC_MBOX_EOE = 0x02, /**< Ethernet-over-EtherCAT */
-    EC_MBOX_COE = 0x04, /**< CANopen-over-EtherCAT */
-    EC_MBOX_FOE = 0x08, /**< File-Access-over-EtherCAT */
-    EC_MBOX_SOE = 0x10, /**< Servo-Profile-over-EtherCAT */
+    EC_MBOX_AOE = 0x01, /**< ADS over EtherCAT */
+    EC_MBOX_EOE = 0x02, /**< Ethernet over EtherCAT */
+    EC_MBOX_COE = 0x04, /**< CANopen over EtherCAT */
+    EC_MBOX_FOE = 0x08, /**< File-Access over EtherCAT */
+    EC_MBOX_SOE = 0x10, /**< Servo-Profile over EtherCAT */
     EC_MBOX_VOE = 0x20  /**< Vendor specific */
 };
 
-/** Slave information interface CANopen-over-EtherCAT details flags.
+/** Slave information interface CANopen over EtherCAT details flags.
  */
 typedef struct {
-    uint8_t enable_sdo : 1; /**< Enable Sdo access. */
+    uint8_t enable_sdo : 1; /**< Enable SDO access. */
     uint8_t enable_sdo_info : 1; /**< SDO information service available. */
-    uint8_t enable_pdo_assign : 1; /**< Pdo mapping configurable. */
-    uint8_t enable_pdo_configuration : 1; /**< Pdo configuration possible. */
+    uint8_t enable_pdo_assign : 1; /**< PDO mapping configurable. */
+    uint8_t enable_pdo_configuration : 1; /**< PDO configuration possible. */
     uint8_t enable_upload_at_startup : 1; /**< ?. */
     uint8_t enable_sdo_complete_access : 1; /**< Complete access possible. */
 } ec_sii_coe_details_t;
@@ -154,6 +180,32 @@ typedef struct {
     uint8_t enable_safeop : 1; /**< ?. */
     uint8_t enable_not_lrw : 1; /**< Slave does not support LRW. */
 } ec_sii_general_flags_t;
+
+/** EtherCAT slave distributed clocks range.
+ */
+typedef enum {
+    EC_DC_32, /**< 32 bit. */
+    EC_DC_64 /*< 64 bit for system time, system time offset and
+               port 0 receive time. */
+} ec_slave_dc_range_t;
+
+/** EtherCAT slave sync signal configuration.
+ */
+typedef struct {
+    uint32_t cycle_time; /**< Cycle time [ns]. */
+    uint32_t shift_time; /**< Shift time [ns]. */
+} ec_sync_signal_t;
+
+/** Access states for SDO entries.
+ *
+ * The access rights are managed per AL state.
+ */
+enum {
+    EC_SDO_ENTRY_ACCESS_PREOP, /**< Access rights in PREOP. */
+    EC_SDO_ENTRY_ACCESS_SAFEOP, /**< Access rights in SAFEOP. */
+    EC_SDO_ENTRY_ACCESS_OP, /**< Access rights in OP. */
+    EC_SDO_ENTRY_ACCESS_COUNT /**< Number of states. */
+};
 
 /*****************************************************************************/
 
@@ -197,29 +249,11 @@ typedef struct {
 #define EC_DBG(fmt, args...) \
     printk(KERN_DEBUG "EtherCAT DEBUG: " fmt, ##args)
 
-/** Convenience macro for defining read-only SysFS attributes.
- *
- * This results in creating a static variable called attr_\a NAME. The SysFS
- * file will be world-readable.
- *
- * \param NAME name of the attribute to create.
- */
-#define EC_SYSFS_READ_ATTR(NAME) \
-    static struct attribute attr_##NAME = { \
-        .name = EC_STR(NAME), .owner = THIS_MODULE, .mode = S_IRUGO \
-    }
+/*****************************************************************************/
 
-/** Convenience macro for defining read-write SysFS attributes.
- *
- * This results in creating a static variable called attr_\a NAME. The SysFS
- * file will be word-readable plus owner-writable.
- *
- * \param NAME name of the attribute to create.
+/** Absolute value.
  */
-#define EC_SYSFS_READ_WRITE_ATTR(NAME) \
-    static struct attribute attr_##NAME = { \
-        .name = EC_STR(NAME), .owner = THIS_MODULE, .mode = S_IRUGO | S_IWUSR \
-    }
+#define EC_ABS(X) ((X) >= 0 ? (X) : -(X))
 
 /*****************************************************************************/
 
@@ -227,11 +261,14 @@ extern char *ec_master_version_str;
 
 /*****************************************************************************/
 
+unsigned int ec_master_count(void);
 void ec_print_data(const uint8_t *, size_t);
 void ec_print_data_diff(const uint8_t *, const uint8_t *, size_t);
-size_t ec_state_string(uint8_t, char *);
+size_t ec_state_string(uint8_t, char *, uint8_t);
 ssize_t ec_mac_print(const uint8_t *, char *);
 int ec_mac_is_zero(const uint8_t *);
+
+ec_master_t *ecrt_request_master_err(unsigned int);
 
 /*****************************************************************************/
 
@@ -253,12 +290,16 @@ typedef struct {
  * state_table in master/sdo_request.c.
  */
 typedef enum {
-    EC_REQUEST_INIT,
-    EC_REQUEST_QUEUED,
-    EC_REQUEST_BUSY,
-    EC_REQUEST_SUCCESS,
-    EC_REQUEST_FAILURE
-} ec_request_state_t;
+    EC_INT_REQUEST_INIT,
+    EC_INT_REQUEST_QUEUED,
+    EC_INT_REQUEST_BUSY,
+    EC_INT_REQUEST_SUCCESS,
+    EC_INT_REQUEST_FAILURE
+} ec_internal_request_state_t;
+
+/*****************************************************************************/
+
+extern const ec_request_state_t ec_request_state_translation_table[];
 
 /*****************************************************************************/
 
@@ -274,5 +315,61 @@ typedef enum {
 typedef struct ec_slave ec_slave_t; /**< \see ec_slave. */
 
 /*****************************************************************************/
+
+/*****************************************************************************/
+
+#ifdef __KERNEL__
+
+/** Mutual exclusion helpers.
+ *
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
+#define ec_mutex_t rt_mutex
+static inline void ec_mutex_init(struct ec_mutex_t *mutex)
+{
+    rt_mutex_init(mutex);
+}
+static inline void ec_mutex_lock(struct ec_mutex_t *mutex)
+{
+    rt_mutex_lock(mutex);
+}
+static inline int ec_mutex_trylock(struct ec_mutex_t *mutex)
+{
+    return rt_mutex_trylock(mutex);
+}
+static inline int ec_mutex_lock_interruptible(struct ec_mutex_t *mutex)
+{
+    return rt_mutex_lock_interruptible(mutex,0);
+}
+static inline void ec_mutex_unlock(struct ec_mutex_t *mutex)
+{
+    rt_mutex_unlock(mutex);
+}
+#else   // < KERNEL_VERSION(2,6,24)
+#define ec_mutex_t semaphore
+static inline void ec_mutex_init(struct ec_mutex_t *sem)
+{
+    sema_init(sem, 1);
+}
+static inline void ec_mutex_lock(struct ec_mutex_t *sem)
+{
+    down(sem);
+}
+static inline int ec_mutex_trylock(struct ec_mutex_t *sem)
+{
+    down(sem);
+    return 1;
+}
+static inline int ec_mutex_lock_interruptible(struct ec_mutex_t *sem)
+{
+    return down_interruptible(sem);
+}
+static inline void ec_mutex_unlock(struct ec_mutex_t *sem)
+{
+    up(sem);
+}
+
+#endif // KERNEL_VERSION(2,6,24)
+#endif // __KERNEL__
 
 #endif

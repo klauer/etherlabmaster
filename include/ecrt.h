@@ -2,32 +2,29 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
- *  This file is part of the IgH EtherCAT Master.
+ *  This file is part of the IgH EtherCAT master userspace library.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT master userspace library is free software; you can
+ *  redistribute it and/or modify it under the terms of the GNU Lesser General
+ *  Public License as published by the Free Software Foundation; version 2.1
+ *  of the License.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT master userspace library is distributed in the hope that
+ *  it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+ *  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU Lesser General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *  You should have received a copy of the GNU Lesser General Public License
+ *  along with the IgH EtherCAT master userspace library. If not, see
+ *  <http://www.gnu.org/licenses/>.
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -42,50 +39,47 @@
  * request a master, to map process data, to communicate with slaves via CoE
  * and to configure and activate the bus.
  *
- * Changes in Version 1.4:
+ * Changes in version 1.5:
  *
- * - Replaced ec_slave_t with ec_slave_config_t, separating the bus
- *   configuration from the actual slaves. Therefore, renamed
- *   ecrt_master_get_slave() to ecrt_master_slave_config().
- * - Replaced slave address string with alias and position values. See
- *   ecrt_master_slave_config().
- * - Removed ecrt_master_get_slave_by_pos(), because it is no longer
- *   necessary due to alias/position addressing.
- * - Added ec_slave_config_state_t for the new method
- *   ecrt_slave_config_state().
- * - Process data memory for a domain can now be allocated externally. This
- *   offers the possibility to use a shared-memory region. Therefore,
- *   added the domain methods ecrt_domain_size() and
- *   ecrt_domain_external_memory().
- * - Pdo entry registration functions do not return a process data pointer,
- *   but an offset in the domain's process data. In addition, an optional bit
- *   position can be requested. This was necessary for the external domain
- *   memory. An additional advantage is, that the returned offset is
- *   immediately valid. If the domain's process data is allocated internally,
- *   the start address can be retrieved with ecrt_domain_data().
- * - Replaced ecrt_slave_pdo_mapping/add/clear() with
- *   ecrt_slave_config_pdo_assign_add() to add a Pdo to a sync manager's Pdo
- *   assignment and ecrt_slave_config_pdo_mapping_add() to add a Pdo entry to a
- *   Pdo's mapping. ecrt_slave_config_pdos() is a convenience function
- *   for both, that uses the new data types ec_pdo_info_t and
- *   ec_pdo_entry_info_t. Pdo entries, that are mapped with these functions
- *   can now immediately be registered, even if the bus is offline.
- * - Renamed ec_bus_status_t, ec_master_status_t to ec_bus_state_t and
- *   ec_master_state_t, respectively. Renamed ecrt_master_get_status() to
- *   ecrt_master_state(), for consistency reasons.
- * - Added ec_domain_state_t and #ec_wc_state_t for a new output parameter
- *   of ecrt_domain_state(). The domain state object does now contain
- *   information, if the process data was exchanged completely.
- * - Former "Pdo registration" meant Pdo entry registration in fact, therefore
- *   renamed ec_pdo_reg_t to ec_pdo_entry_reg_t and ecrt_domain_register_pdo()
- *   to ecrt_slave_config_reg_pdo_entry().
- * - Removed ecrt_domain_register_pdo_range(), because it's functionality can
- *   be reached by specifying an explicit Pdo assignment/mapping and
- *   registering the mapped Pdo entries.
- * - Added an Sdo access interface, working with Sdo requests. These can be
- *   scheduled for reading and writing during realtime operation.
- * - Exported ecrt_slave_config_sdo(), the generic Sdo configuration function.
- * - Removed the bus_state and bus_tainted flags from ec_master_state_t.
+ * - Added the distributed clocks feature and the respective method
+ *   ecrt_slave_config_dc() to configure a slave for cyclic operation, and
+ *   ecrt_master_application_time(), ecrt_master_sync_reference_clock() and
+ *   ecrt_master_sync_slave_clocks() for offset and drift compensation. The
+ *   EC_TIMEVAL2NANO() macro can be used for epoch time conversion, while the
+ *   ecrt_master_sync_monitor_queue() and ecrt_master_sync_monitor_process()
+ *   methods can be used to monitor the synchrony.
+ * - Improved the callback mechanism. ecrt_master_callbacks() now takes two
+ *   callback functions for locking and unlocking the fsm datagram queue.
+ * - Added watchdog configuration (method ecrt_slave_config_watchdog(),
+ *   #ec_watchdog_mode_t, \a watchdog_mode parameter in ec_sync_info_t and
+ *   ecrt_slave_config_sync_manager()).
+ * - Added ecrt_slave_config_complete_sdo() method to download an SDO during
+ *   configuration via CompleteAccess.
+ * - Added ecrt_master_deactivate() to remove the bus configuration.
+ * - Added ecrt_open_master() and ecrt_master_reserve() separation for
+ *   userspace.
+ * - Added bus information interface (methods ecrt_master(),
+ *   ecrt_master_get_slave(), ecrt_master_get_sync_manager(),
+ *   ecrt_master_get_pdo() and ecrt_master_get_pdo_entry()) to get information
+ *   about the currently connected slaves and the PDO entries provided.
+ * - Added ecrt_master_sdo_download() and ecrt_master_sdo_upload()
+ *   methods to let an application transfer SDOs before activating the master.
+ * - Changed the meaning of the negative return values of
+ *   ecrt_slave_config_reg_pdo_entry() and ecrt_slave_config_sdo*().
+ * - Implemented the Vendor-specific over EtherCAT mailbox protocol. See
+ *   ecrt_slave_config_create_voe_handler().
+ * - Renamed ec_sdo_request_state_t to #ec_request_state_t, because it is also
+ *   used by VoE handlers.
+ * - Removed 'const' from argument of ecrt_sdo_request_state(), because the
+ *   userspace library has to modify object internals.
+ * - Added 64-bit data access macros.
+ * - Added ecrt_slave_config_idn() method for storing SoE IDN configurations,
+ *   and ecrt_master_read_idn() and ecrt_master_write_idn() to read/write IDNs
+ *   ad-hoc via the user-space library.
+ * - Added ecrt_master_reset() to initiate retrying to configure slaves.
+ * - Added support for overlapping PDOs which allows inputs to use the same
+ *   space as outputs on the frame. This reduces the frame length.
+ *
  *
  * @{
  */
@@ -95,12 +89,14 @@
 #ifndef __ECRT_H__
 #define __ECRT_H__
 
-#include <asm/byteorder.h>
-
 #ifdef __KERNEL__
+#include <asm/byteorder.h>
 #include <linux/types.h>
+#include <linux/time.h>
 #else
+#include <stdlib.h> // for size_t
 #include <stdint.h>
+#include <sys/time.h> // for struct timeval
 #endif
 
 /******************************************************************************
@@ -113,7 +109,7 @@
 
 /** EtherCAT realtime interface minor version number.
  */
-#define ECRT_VER_MINOR 4
+#define ECRT_VER_MINOR 5
 
 /** EtherCAT realtime interface version word generator.
  */
@@ -135,8 +131,28 @@
  */
 #define EC_MAX_SYNC_MANAGERS 16
 
+/** Maximum string length.
+ *
+ * Used in ec_slave_info_t.
+ */
+#define EC_MAX_STRING_LENGTH 64
+
+/** Maximum number of slave ports. */
+#define EC_MAX_PORTS 4
+
+/** Timeval to nanoseconds conversion.
+ *
+ * This macro converts a Unix epoch time to EtherCAT DC time.
+ *
+ * \see void ecrt_master_application_time()
+ *
+ * \param TV struct timeval containing epoch time.
+ */
+#define EC_TIMEVAL2NANO(TV) \
+    (((TV).tv_sec - 946684800ULL) * 1000000000ULL + (TV).tv_usec * 1000ULL)
+
 /******************************************************************************
- * Data types 
+ * Data types
  *****************************************************************************/
 
 struct ec_master;
@@ -150,6 +166,9 @@ typedef struct ec_domain ec_domain_t; /**< \see ec_domain */
 
 struct ec_sdo_request;
 typedef struct ec_sdo_request ec_sdo_request_t; /**< \see ec_sdo_request. */
+
+struct ec_voe_handler;
+typedef struct ec_voe_handler ec_voe_handler_t; /**< \see ec_voe_handler. */
 
 /*****************************************************************************/
 
@@ -178,7 +197,7 @@ typedef struct {
 /** Slave configuration state.
  *
  * This is used as an output parameter of ecrt_slave_config_state().
- * 
+ *
  * \see ecrt_slave_config_state().
  */
 typedef struct  {
@@ -194,6 +213,72 @@ typedef struct  {
                                  Note that each state is coded in a different
                                  bit! */
 } ec_slave_config_state_t;
+
+/*****************************************************************************/
+
+/** Master information.
+ *
+ * This is used as an output parameter of ecrt_master().
+ *
+ * \see ecrt_master().
+ */
+typedef struct {
+   unsigned int slave_count; /**< Number of slaves in the bus. */
+   unsigned int link_up : 1; /**< \a true, if the network link is up. */
+   uint8_t scan_busy; /**< \a true, while the master is scanning the bus */
+   uint64_t app_time; /**< Application time. */
+} ec_master_info_t;
+
+/*****************************************************************************/
+
+/** EtherCAT slave port descriptor.
+ */
+typedef enum {
+    EC_PORT_NOT_IMPLEMENTED, /**< Port is not implemented. */
+    EC_PORT_NOT_CONFIGURED, /**< Port is not configured. */
+    EC_PORT_EBUS, /**< Port is an e-bus. */
+    EC_PORT_MII /**< Port is a mii. */
+} ec_slave_port_desc_t;
+
+/*****************************************************************************/
+
+/** EtherCAT slave port information.
+ */
+typedef struct {
+    uint8_t link_up; /**< Link detected. */
+    uint8_t loop_closed; /**< Loop closed. */
+    uint8_t signal_detected; /**< Detected signal on RX port. */
+} ec_slave_port_link_t;
+
+/*****************************************************************************/
+
+/** Slave information.
+ *
+ * This is used as an output parameter of ecrt_master_get_slave().
+ *
+ * \see ecrt_master_get_slave().
+ */
+typedef struct {
+    uint16_t position; /**< Offset of the slave in the ring. */
+    uint32_t vendor_id; /**< Vendor-ID stored on the slave. */
+    uint32_t product_code; /**< Product-Code stored on the slave. */
+    uint32_t revision_number; /**< Revision-Number stored on the slave. */
+    uint32_t serial_number; /**< Serial-Number stored on the slave. */
+    uint16_t alias; /**< The slaves alias if not equal to 0. */
+    int16_t current_on_ebus; /**< Used current in mA. */
+    struct {
+        ec_slave_port_desc_t desc;
+        ec_slave_port_link_t link;
+        uint32_t receive_time;
+        uint16_t next_slave;
+        uint32_t delay_to_next_dc;
+    } ports[EC_MAX_PORTS];
+    uint8_t al_state; /**< Current state of the slave. */
+    uint8_t error_flag; /**< Error flag for that slave. */
+    uint8_t sync_count; /**< Number of sync managers. */
+    uint16_t sdo_count; /**< Number of SDOs. */
+    char name[EC_MAX_STRING_LENGTH]; /**< Name of the slave. */
+} ec_slave_info_t;
 
 /*****************************************************************************/
 
@@ -221,7 +306,7 @@ typedef struct {
 
 /*****************************************************************************/
 
-/** Direction type for Pdo assignment functions.
+/** Direction type for PDO assignment functions.
  */
 typedef enum {
     EC_DIR_INVALID, /**< Invalid direction. Do not use this value. */
@@ -232,33 +317,45 @@ typedef enum {
 
 /*****************************************************************************/
 
-/** Pdo entry configuration information.
+/** Watchdog mode for sync manager configuration.
+ *
+ * Used to specify, if a sync manager's watchdog is to be enabled.
+ */
+typedef enum {
+    EC_WD_DEFAULT, /**< Use the default setting of the sync manager. */
+    EC_WD_ENABLE, /**< Enable the watchdog. */
+    EC_WD_DISABLE, /**< Disable the watchdog. */
+} ec_watchdog_mode_t;
+
+/*****************************************************************************/
+
+/** PDO entry configuration information.
  *
  * This is the data type of the \a entries field in ec_pdo_info_t.
  *
  * \see ecrt_slave_config_pdos().
  */
 typedef struct {
-    uint16_t index; /**< Pdo entry index. */
-    uint8_t subindex; /**< Pdo entry subindex. */
-    uint8_t bit_length; /**< Size of the Pdo entry in bit. */
+    uint16_t index; /**< PDO entry index. */
+    uint8_t subindex; /**< PDO entry subindex. */
+    uint8_t bit_length; /**< Size of the PDO entry in bit. */
 } ec_pdo_entry_info_t;
 
 /*****************************************************************************/
 
-/** Pdo configuration information.
- * 
+/** PDO configuration information.
+ *
  * This is the data type of the \a pdos field in ec_sync_info_t.
- * 
+ *
  * \see ecrt_slave_config_pdos().
  */
 typedef struct {
-    uint16_t index; /**< Pdo index. */
-    unsigned int n_entries; /**< Number of Pdo entries in \a entries to map.
+    uint16_t index; /**< PDO index. */
+    unsigned int n_entries; /**< Number of PDO entries in \a entries to map.
                               Zero means, that the default mapping shall be
                               used (this can only be done if the slave is
                               present at bus configuration time). */
-    ec_pdo_entry_info_t *entries; /**< Array of Pdo entries to map. Can either
+    ec_pdo_entry_info_t *entries; /**< Array of PDO entries to map. Can either
                                     be \a NULL, or must contain at
                                     least \a n_entries values. */
 } ec_pdo_info_t;
@@ -267,8 +364,8 @@ typedef struct {
 
 /** Sync manager configuration information.
  *
- * This can be use to configure multiple sync managers including the Pdo
- * assignment and Pdo mapping. It is used as an input parameter type in
+ * This can be use to configure multiple sync managers including the PDO
+ * assignment and PDO mapping. It is used as an input parameter type in
  * ecrt_slave_config_pdos().
  */
 typedef struct {
@@ -276,14 +373,15 @@ typedef struct {
                      than #EC_MAX_SYNC_MANAGERS for a valid sync manager,
                      but can also be \a 0xff to mark the end of the list. */
     ec_direction_t dir; /**< Sync manager direction. */
-    unsigned int n_pdos; /**< Number of Pdos in \a pdos. */
-    ec_pdo_info_t *pdos; /**< Array with Pdos to assign. This must contain
-                            at least \a n_pdos Pdos. */
+    unsigned int n_pdos; /**< Number of PDOs in \a pdos. */
+    ec_pdo_info_t *pdos; /**< Array with PDOs to assign. This must contain
+                            at least \a n_pdos PDOs. */
+    ec_watchdog_mode_t watchdog_mode; /**< Watchdog mode. */
 } ec_sync_info_t;
 
 /*****************************************************************************/
 
-/** List record type for Pdo entry mass-registration.
+/** List record type for PDO entry mass-registration.
  *
  * This type is used for the array parameter of the
  * ecrt_domain_reg_pdo_entry_list()
@@ -293,32 +391,48 @@ typedef struct {
     uint16_t position; /**< Slave position. */
     uint32_t vendor_id; /**< Slave vendor ID. */
     uint32_t product_code; /**< Slave product code. */
-    uint16_t index; /**< Pdo entry index. */
-    uint8_t subindex; /**< Pdo entry subindex. */
-    unsigned int *offset; /**< Pointer to a variable to store the Pdo entry's
+    uint16_t index; /**< PDO entry index. */
+    uint8_t subindex; /**< PDO entry subindex. */
+    unsigned int *offset; /**< Pointer to a variable to store the PDO entry's
                        (byte-)offset in the process data. */
-    unsigned int *bit_position; /**< Pointer to a variable to store a bit 
+    unsigned int *bit_position; /**< Pointer to a variable to store a bit
                                   position (0-7) within the \a offset. Can be
                                   NULL, in which case an error is raised if the
-                                  Pdo entry does not byte-align. */
+                                  PDO entry does not byte-align. */
 } ec_pdo_entry_reg_t;
 
 /*****************************************************************************/
 
-/** Sdo request state.
+/** Request state.
  *
- * This is used as return type of ecrt_sdo_request_state().
+ * This is used as return type for ecrt_sdo_request_state() and
+ * ecrt_voe_handler_state().
  */
 typedef enum {
-    EC_SDO_REQUEST_UNUSED, /**< Not requested. */
-    EC_SDO_REQUEST_BUSY, /**< Request is being processed. */
-    EC_SDO_REQUEST_SUCCESS, /**< Request was processed successfully. */
-    EC_SDO_REQUEST_ERROR, /**< Request processing failed. */
-} ec_sdo_request_state_t;
+    EC_REQUEST_UNUSED, /**< Not requested. */
+    EC_REQUEST_BUSY, /**< Request is being processed. */
+    EC_REQUEST_SUCCESS, /**< Request was processed successfully. */
+    EC_REQUEST_ERROR, /**< Request processing failed. */
+} ec_request_state_t;
+
+/*****************************************************************************/
+
+/** Application-layer state.
+ */
+typedef enum {
+    EC_AL_STATE_INIT = 1, /**< Init. */
+    EC_AL_STATE_PREOP = 2, /**< Pre-operational. */
+    EC_AL_STATE_SAFEOP = 4, /**< Safe-operational. */
+    EC_AL_STATE_OP = 8, /**< Operational. */
+} ec_al_state_t;
 
 /******************************************************************************
  * Global functions
  *****************************************************************************/
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /** Returns the version magic of the realtime interface.
  *
@@ -327,20 +441,42 @@ typedef enum {
 unsigned int ecrt_version_magic(void);
 
 /** Requests an EtherCAT master for realtime operation.
- * 
+ *
  * Before an application can access an EtherCAT master, it has to reserve one
  * for exclusive use.
+ *
+ * In userspace, this is a convenience function for ecrt_open_master() and
+ * ecrt_master_reserve().
  *
  * This function has to be the first function an application has to call to
  * use EtherCAT. The function takes the index of the master as its argument.
  * The first master has index 0, the n-th master has index n - 1. The number
  * of masters has to be specified when loading the master module.
  *
- * \return Pointer to reserved master, or \a NULL on error.
+ * \return Pointer to the reserved master, otherwise \a NULL.
  */
 ec_master_t *ecrt_request_master(
         unsigned int master_index /**< Index of the master to request. */
         );
+
+#ifndef __KERNEL__
+
+/** Opens an EtherCAT master for userspace access.
+ *
+ * This function has to be the first function an application has to call to
+ * use EtherCAT. The function takes the index of the master as its argument.
+ * The first master has index 0, the n-th master has index n - 1. The number
+ * of masters has to be specified when loading the master module.
+ *
+ * For convenience, the function ecrt_request_master() can be used.
+ *
+ * \return Pointer to the opened master, otherwise \a NULL.
+ */
+ec_master_t *ecrt_open_master(
+        unsigned int master_index /**< Index of the master to request. */
+        );
+
+#endif // #ifndef __KERNEL__
 
 /** Releases a requested EtherCAT master.
  *
@@ -351,34 +487,96 @@ void ecrt_release_master(
         ec_master_t *master /**< EtherCAT master */
         );
 
+
+#ifdef __KERNEL__
+/** Attach to a running master
+ *   
+ * This function returns the master handle for the RTDM-Interface
+ *
+ * \return Pointer to the opened master, otherwise \a NULL.
+ */
+ec_master_t *ecrt_attach_master(
+       unsigned int master_index /**< Index of the master to request. */
+       );
+
+#endif // #ifdef __KERNEL__
+
+
+
+
 /******************************************************************************
  * Master methods
  *****************************************************************************/
 
+#ifndef __KERNEL__
+
+/** Reserves an EtherCAT master for realtime operation.
+ *
+ * Before an application can use PDO/domain registration functions or SDO
+ * request functions on the master, it has to reserve one for exclusive use.
+ *
+ * \return 0 in case of success, else < 0
+ *
+ */
+int ecrt_master_reserve(
+        ec_master_t *master /**< EtherCAT master */
+        );
+
+#endif // #ifndef __KERNEL__
+
+#ifdef __KERNEL__
+
 /** Sets the locking callbacks.
  *
  * For concurrent master access, the application has to provide a locking
- * mechanism (see section FIXME in the docs). The method takes two function
- * pointers and a data value as its parameters. The arbitrary \a cb_data value
- * will be passed as argument on every callback. Asynchronous master access
- * (like EoE processing) is only possible if the callbacks have been set.
+ * mechanism. The method takes two function pointers and a data value as
+ * its parameters.
+ * The arbitrary \a cb_data value will be passed as argument on every callback.
  *
- * The request_cb function must return zero, to allow another instance
- * (an EoE process for example) to access the master. Non-zero means,
- * that access is currently forbidden.
  */
 void ecrt_master_callbacks(
         ec_master_t *master, /**< EtherCAT master */
-        int (*request_cb)(void *), /**< Lock request function. */
-        void (*release_cb)(void *), /**< Lock release function. */
+        void (*lock_cb)(void *), /**< Lock function. */
+        void (*unlock_cb)(void *), /**< Unlock function. */
         void *cb_data /**< Arbitrary user data. */
         );
+
+/** Returns domain structure pointer
+ *
+ * This functions return the domain structure pointer for usage inside the
+ * RTDM-Interface.
+ *
+ * \return Pointer to the domain on success, else NULL.
+ */
+ec_domain_t *ecrt_master_find_domain(
+        ec_master_t *master, 
+        unsigned int index);
+
+
+#endif /* __KERNEL__ */
+
+
+#ifndef __KERNEL__
+/** Return the domain index of a given domain strucure
+ *
+ * Return the domain index of a given domain strucure. Usage inside of the
+ * RTDM Interface
+ *
+ * \return Index of the domain strucure
+ *
+ */
+ unsigned int ecrt_domain_index(
+         ec_domain_t *domain
+         );
+
+#endif // #ifndef __KERNEL__
+
 
 /** Creates a new process data domain.
  *
  * For process data exchange, at least one process data domain is needed.
  * This method creates a new process data domain and returns a pointer to the
- * new domain object. This object can be used for registering Pdos and
+ * new domain object. This object can be used for registering PDOs and
  * exchanging them in cyclic operation.
  *
  * \return Pointer to the new domain on success, else NULL.
@@ -386,6 +584,7 @@ void ecrt_master_callbacks(
 ec_domain_t *ecrt_master_create_domain(
         ec_master_t *master /**< EtherCAT master. */
         );
+
 
 /** Obtains a slave configuration.
  *
@@ -422,6 +621,173 @@ ec_slave_config_t *ecrt_master_slave_config(
         uint32_t product_code /**< Expected product code. */
         );
 
+/** Obtains master information.
+ *
+ * No memory is allocated on the heap in
+ * this function.
+ *
+ * \attention The pointer to this structure must point to a valid variable.
+ *
+ * \return 0 in case of success, else < 0
+ */
+int ecrt_master(
+        ec_master_t *master, /**< EtherCAT master */
+        ec_master_info_t *master_info /**< Structure that will output the
+                                        information */
+        );
+
+/** Obtains slave information.
+ *
+ * Tries to find the slave with the given ring position. The obtained
+ * information is stored in a structure. No memory is allocated on the heap in
+ * this function.
+ *
+ * \attention The pointer to this structure must point to a valid variable.
+ *
+ * \return 0 in case of success, else < 0
+ */
+int ecrt_master_get_slave(
+        ec_master_t *master, /**< EtherCAT master */
+        uint16_t slave_position, /**< Slave position. */
+        ec_slave_info_t *slave_info /**< Structure that will output the
+                                      information */
+        );
+
+#ifndef __KERNEL__
+
+/** Returns the proposed configuration of a slave's sync manager.
+ *
+ * Fills a given ec_sync_info_t structure with the attributes of a sync
+ * manager. The \a pdos field of the return value is left empty. Use
+ * ecrt_master_get_pdo() to get the PDO information.
+ *
+ * \return zero on success, else non-zero
+ */
+int ecrt_master_get_sync_manager(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint16_t slave_position, /**< Slave position. */
+        uint8_t sync_index, /**< Sync manager index. Must be less
+                                than #EC_MAX_SYNC_MANAGERS. */
+        ec_sync_info_t *sync /**< Pointer to output structure. */
+        );
+
+/** Returns information about a currently assigned PDO.
+ *
+ * Fills a given ec_pdo_info_t structure with the attributes of a currently
+ * assigned PDO of the given sync manager. The \a entries field of the return
+ * value is left empty. Use ecrt_master_get_pdo_entry() to get the PDO
+ * entry information.
+ *
+ * \retval zero on success, else non-zero
+ */
+int ecrt_master_get_pdo(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint16_t slave_position, /**< Slave position. */
+        uint8_t sync_index, /**< Sync manager index. Must be less
+                                 than #EC_MAX_SYNC_MANAGERS. */
+        uint16_t pos, /**< Zero-based PDO position. */
+        ec_pdo_info_t *pdo /**< Pointer to output structure. */
+        );
+
+/** Returns information about a currently mapped PDO entry.
+ *
+ * Fills a given ec_pdo_entry_info_t structure with the attributes of a
+ * currently mapped PDO entry of the given PDO.
+ *
+ * \retval zero on success, else non-zero
+ */
+int ecrt_master_get_pdo_entry(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint16_t slave_position, /**< Slave position. */
+        uint8_t sync_index, /**< Sync manager index. Must be less
+                                 than #EC_MAX_SYNC_MANAGERS. */
+        uint16_t pdo_pos, /**< Zero-based PDO position. */
+        uint16_t entry_pos, /**< Zero-based PDO entry position. */
+        ec_pdo_entry_info_t *entry /**< Pointer to output structure. */
+        );
+
+/** Executes an SDO write request to download data.
+ *
+ * This function operates aside of the normal way to request SDOs. Before the
+ * activation of the master, these requests are processed by the master state
+ * machine itself. After activation the user has to ensure cyclic processing.
+ *
+ * \retval  0 Success.
+ * \retval -1 An error occured.
+ */
+int ecrt_master_sdo_download(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint16_t slave_position, /**< Slave position. */
+        uint16_t index, /**< Index of the SDO. */
+        uint8_t subindex, /**< Subindex of the SDO. */
+        uint8_t *data, /**< Data buffer to download. */
+        size_t data_size, /**< Size of the data buffer. */
+        uint32_t *abort_code /**< Abort code of the SDO download. */
+        );
+
+/** Executes a SDO read request to upload data.
+ *
+ * This function operates aside of the normal way to request SDOs. Before the
+ * activation of the master, these requests are processed by the master state
+ * machine itself. After activation the user have to ensure cyclic
+ * processing.
+ *
+ * \retval  0 Success.
+ * \retval -1 Error occurred.
+ */
+int ecrt_master_sdo_upload(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint16_t slave_position, /**< Slave position. */
+        uint16_t index, /**< Index of the SDO. */
+        uint8_t subindex, /**< Subindex of the SDO. */
+        uint8_t *target, /**< Target buffer for the upload. */
+        size_t target_size, /**< Size of the target buffer. */
+        size_t *result_size, /**< Uploaded data size. */
+        uint32_t *abort_code /**< Abort code of the SDO upload. */
+        );
+
+#endif /* #ifndef __KERNEL__ */
+
+/** Executes an SoE write request.
+ *
+ * Starts writing an IDN and blocks until the request was processed, or an
+ * error occurred.
+ *
+ * \retval  0 Success.
+ * \retval -1 An error occured.
+ */
+int ecrt_master_write_idn(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint16_t slave_position, /**< Slave position. */
+        uint8_t drive_no, /**< Drive number. */
+        uint16_t idn, /**< SoE IDN (see ecrt_slave_config_idn()). */
+        uint8_t *data, /**< Pointer to data to write. */
+        size_t data_size, /**< Size of data to write. */
+        uint16_t *error_code /**< Pointer to variable, where an SoE error code
+                               can be stored. */
+        );
+
+/** Executes an SoE read request.
+ *
+ * Starts reading an IDN and blocks until the request was processed, or an
+ * error occurred.
+ *
+ * \retval  0 Success.
+ * \retval -1 An error occured.
+ */
+int ecrt_master_read_idn(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint16_t slave_position, /**< Slave position. */
+        uint8_t drive_no, /**< Drive number. */
+        uint16_t idn, /**< SoE IDN (see ecrt_slave_config_idn()). */
+        uint8_t *target, /**< Pointer to memory where the read data can be
+                           stored. */
+        size_t target_size, /**< Size of the memory \a target points to. */
+        size_t *result_size, /**< Actual size of the received data. */
+        uint16_t *error_code /**< Pointer to variable, where an SoE error code
+                               can be stored. */
+        );
+
 /** Finishes the configuration phase and prepares for cyclic operation.
  *
  * This function tells the master that the configuration phase is finished and
@@ -440,6 +806,27 @@ ec_slave_config_t *ecrt_master_slave_config(
  */
 int ecrt_master_activate(
         ec_master_t *master /**< EtherCAT master. */
+        );
+
+/** Deactivates the master.
+ *
+ * Removes the bus configuration. All objects created by
+ * ecrt_master_create_domain(), ecrt_master_slave_config(), ecrt_domain_data()
+ * ecrt_slave_config_create_sdo_request() and
+ * ecrt_slave_config_create_voe_handler() are freed, so pointers to them
+ * become invalid.
+ */
+void ecrt_master_deactivate(
+        ec_master_t *master /**< EtherCAT master. */
+        );
+
+
+/** Set interval between calls to ecrt_master_send
+ *
+ */
+int ecrt_master_set_send_interval(
+        ec_master_t *master, /**< EtherCAT master. */
+        size_t send_interval /**< Send interval in us */
         );
 
 /** Sends all datagrams in the queue.
@@ -477,6 +864,87 @@ void ecrt_master_state(
         ec_master_state_t *state /**< Structure to store the information. */
         );
 
+/** Reads the current master state and the al_state of all configured slaves.
+ *
+ * use this function instead of ecrt_master_state if there are unused
+ * slaves on the bus
+ * Stores the master state information in the given \a state structure.
+ * \see ecrt_master_state()
+ */
+void ecrt_master_configured_slaves_state(
+        const ec_master_t *master, /**< EtherCAT master. */
+        ec_master_state_t *state /**< Structure to store the information. */
+        );
+
+/** Sets the application time.
+ *
+ * The master has to know the application's time when operating slaves with
+ * distributed clocks. The time is not incremented by the master itself, so
+ * this method has to be called cyclically.
+ *
+ * The time is used when setting the slaves' <tt>System Time Offset</tt> and
+ * <tt>Cyclic Operation Start Time</tt> registers and when synchronizing the
+ * DC reference clock to the application time via
+ * ecrt_master_sync_reference_clock().
+ *
+ * The time is defined as nanoseconds from 2000-01-01 00:00. Converting an
+ * epoch time can be done with the EC_TIMEVAL2NANO() macro.
+ */
+void ecrt_master_application_time(
+        ec_master_t *master, /**< EtherCAT master. */
+        uint64_t app_time /**< Application time. */
+        );
+
+/** Queues the DC reference clock drift compensation datagram for sending.
+ *
+ * The reference clock will by synchronized to the application time provided
+ * by the last call off ecrt_master_application_time().
+ */
+void ecrt_master_sync_reference_clock(
+        ec_master_t *master /**< EtherCAT master. */
+        );
+
+/** Queues the DC clock drift compensation datagram for sending.
+ *
+ * All slave clocks synchronized to the reference clock.
+ */
+void ecrt_master_sync_slave_clocks(
+        ec_master_t *master /**< EtherCAT master. */
+        );
+
+/** Queues the DC synchonity monitoring datagram for sending.
+ *
+ * The datagram broadcast-reads all "System time difference" registers (\a
+ * 0x092c) to get an upper estiomation of the DC synchony. The result can be
+ * checked with the ecrt_master_sync_monitor_process() method.
+ */
+void ecrt_master_sync_monitor_queue(
+        ec_master_t *master /**< EtherCAT master. */
+        );
+
+/** Processes the DC synchonity monitoring datagram.
+ *
+ * If the sync monitoring datagram was sent before with
+ * ecrt_master_sync_monitor_queue(), the result can be queried with this
+ * method.
+ *
+ * \return Upper estination of the maximum time difference in ns.
+ */
+uint32_t ecrt_master_sync_monitor_process(
+        ec_master_t *master /**< EtherCAT master. */
+        );
+
+/** Retry configuring slaves.
+ *
+ * Via this method, the application can tell the master to bring all slaves to
+ * OP state. In general, this is not necessary, because it is automatically
+ * done by the master. But with special slaves, that can be reconfigured by
+ * the vendor during runtime, it can be useful.
+ */
+void ecrt_master_reset(
+        ec_master_t *master /**< EtherCAT master. */
+        );
+
 /******************************************************************************
  * Slave configuration methods
  *****************************************************************************/
@@ -492,10 +960,36 @@ int ecrt_slave_config_sync_manager(
         ec_slave_config_t *sc, /**< Slave configuration. */
         uint8_t sync_index, /**< Sync manager index. Must be less
                               than #EC_MAX_SYNC_MANAGERS. */
-        ec_direction_t dir /**< Input/Output. */
+        ec_direction_t direction, /**< Input/Output. */
+        ec_watchdog_mode_t watchdog_mode /** Watchdog mode. */
         );
 
-/** Add a Pdo to a sync manager's Pdo assignment.
+/** Configure a slave's watchdog times.
+ */
+void ecrt_slave_config_watchdog(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        uint16_t watchdog_divider, /**< Number of 40 ns intervals. Used as a
+                                     base unit for all slave watchdogs. If set
+                                     to zero, the value is not written, so the
+                                     default ist used. */
+        uint16_t watchdog_intervals /**< Number of base intervals for process
+                                      data watchdog. If set to zero, the value
+                                      is not written, so the default is used.
+                                     */
+        );
+
+/** Configure wether a slave allows overlapping PDOs.
+ *
+ * Overlapping PDOs allows inputs to use the same space as outputs on the frame.
+ * This reduces the frame length.
+ */
+void ecrt_slave_config_overlapping_pdos(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        uint8_t allow_overlapping_pdos /**< Allow overlapping PDOs */
+        );
+
+
+/** Add a PDO to a sync manager's PDO assignment.
  *
  * \see ecrt_slave_config_pdos()
  * \return zero on success, else non-zero
@@ -504,15 +998,15 @@ int ecrt_slave_config_pdo_assign_add(
         ec_slave_config_t *sc, /**< Slave configuration. */
         uint8_t sync_index, /**< Sync manager index. Must be less
                               than #EC_MAX_SYNC_MANAGERS. */
-        uint16_t index /**< Index of the Pdo to assign. */
+        uint16_t index /**< Index of the PDO to assign. */
         );
 
-/** Clear a sync manager's Pdo assignment.
+/** Clear a sync manager's PDO assignment.
  *
- * This can be called before assigning Pdos via
+ * This can be called before assigning PDOs via
  * ecrt_slave_config_pdo_assign_add(), to clear the default assignment of a
  * sync manager.
- * 
+ *
  * \see ecrt_slave_config_pdos()
  */
 void ecrt_slave_config_pdo_assign_clear(
@@ -521,34 +1015,34 @@ void ecrt_slave_config_pdo_assign_clear(
                               than #EC_MAX_SYNC_MANAGERS. */
         );
 
-/** Add a Pdo entry to the given Pdo's mapping.
+/** Add a PDO entry to the given PDO's mapping.
  *
  * \see ecrt_slave_config_pdos()
  * \return zero on success, else non-zero
  */
 int ecrt_slave_config_pdo_mapping_add(
         ec_slave_config_t *sc, /**< Slave configuration. */
-        uint16_t pdo_index, /**< Index of the Pdo. */
-        uint16_t entry_index, /**< Index of the Pdo entry to add to the Pdo's
+        uint16_t pdo_index, /**< Index of the PDO. */
+        uint16_t entry_index, /**< Index of the PDO entry to add to the PDO's
                                 mapping. */
-        uint8_t entry_subindex, /**< Subindex of the Pdo entry to add to the
-                                  Pdo's mapping. */
-        uint8_t entry_bit_length /**< Size of the Pdo entry in bit. */
+        uint8_t entry_subindex, /**< Subindex of the PDO entry to add to the
+                                  PDO's mapping. */
+        uint8_t entry_bit_length /**< Size of the PDO entry in bit. */
         );
 
-/** Clear the mapping of a given Pdo.
+/** Clear the mapping of a given PDO.
  *
- * This can be called before mapping Pdo entries via
+ * This can be called before mapping PDO entries via
  * ecrt_slave_config_pdo_mapping_add(), to clear the default mapping.
  *
  * \see ecrt_slave_config_pdos()
  */
 void ecrt_slave_config_pdo_mapping_clear(
         ec_slave_config_t *sc, /**< Slave configuration. */
-        uint16_t pdo_index /**< Index of the Pdo. */
+        uint16_t pdo_index /**< Index of the PDO. */
         );
 
-/** Specify a complete Pdo configuration.
+/** Specify a complete PDO configuration.
  *
  * This function is a convenience wrapper for the functions
  * ecrt_slave_config_sync_manager(), ecrt_slave_config_pdo_assign_clear(),
@@ -557,7 +1051,7 @@ void ecrt_slave_config_pdo_mapping_clear(
  * automatic code generation.
  *
  * The following example shows, how to specify a complete configuration,
- * including the Pdo mappings. With this information, the master is able to
+ * including the PDO mappings. With this information, the master is able to
  * reserve the complete process data, even if the slave is not present at
  * configuration time:
  *
@@ -566,31 +1060,31 @@ void ecrt_slave_config_pdo_mapping_clear(
  *     {0x3101, 1,  8}, // status
  *     {0x3101, 2, 16}  // value
  * };
- * 
+ *
  * ec_pdo_entry_info_t el3162_channel2[] = {
  *     {0x3102, 1,  8}, // status
  *     {0x3102, 2, 16}  // value
  * };
- * 
+ *
  * ec_pdo_info_t el3162_pdos[] = {
  *     {0x1A00, 2, el3162_channel1},
  *     {0x1A01, 2, el3162_channel2}
  * };
- * 
+ *
  * ec_sync_info_t el3162_syncs[] = {
  *     {2, EC_DIR_OUTPUT},
  *     {3, EC_DIR_INPUT, 2, el3162_pdos},
  *     {0xff}
  * };
- * 
+ *
  * if (ecrt_slave_config_pdos(sc_ana_in, EC_END, el3162_syncs)) {
  *     // handle error
  * }
  * \endcode
- * 
- * The next example shows, how to configure the Pdo assignment only. The
- * entries for each assigned Pdo are taken from the Pdo's default mapping.
- * Please note, that Pdo entry registration will fail, if the Pdo
+ *
+ * The next example shows, how to configure the PDO assignment only. The
+ * entries for each assigned PDO are taken from the PDO's default mapping.
+ * Please note, that PDO entry registration will fail, if the PDO
  * configuration is left empty and the slave is offline.
  *
  * \code
@@ -598,11 +1092,11 @@ void ecrt_slave_config_pdo_mapping_clear(
  *     {0x1600}, // Channel 1
  *     {0x1601}  // Channel 2
  * };
- * 
+ *
  * ec_sync_info_t syncs[] = {
  *     {3, EC_DIR_INPUT, 2, pdos},
  * };
- * 
+ *
  * if (ecrt_slave_config_pdos(slave_config_ana_in, 1, syncs)) {
  *     // handle error
  * }
@@ -624,57 +1118,74 @@ int ecrt_slave_config_pdos(
                                        configurations. */
         );
 
-/** Registers a Pdo entry for process data exchange in a domain.
+/** Registers a PDO entry for process data exchange in a domain.
  *
- * Searches the assigned Pdos for the given Pdo entry. An error is raised, if
+ * Searches the assigned PDOs for the given PDO entry. An error is raised, if
  * the given entry is not mapped. Otherwise, the corresponding sync manager
  * and FMMU configurations are provided for slave configuration and the
- * respective sync manager's assigned Pdos are appended to the given domain,
- * if not already done. The offset of the requested Pdo entry's data inside
- * the domain's process data is returned. Optionally, the Pdo entry bit
+ * respective sync manager's assigned PDOs are appended to the given domain,
+ * if not already done. The offset of the requested PDO entry's data inside
+ * the domain's process data is returned. Optionally, the PDO entry bit
  * position (0-7) can be retrieved via the \a bit_position output parameter.
- * This pointer may be \a NULL, in this case an error is raised if the Pdo
+ * This pointer may be \a NULL, in this case an error is raised if the PDO
  * entry does not byte-align.
  *
- * \retval >=0 Success: Offset of the Pdo entry's process data.
- * \retval -1  Error: Pdo entry not found.
- * \retval -2  Error: Failed to register Pdo entry.
- * \retval -3  Error: Pdo entry is not byte-aligned.
+ * \retval >=0 Success: Offset of the PDO entry's process data.
+ * \retval  <0 Error code.
  */
 int ecrt_slave_config_reg_pdo_entry(
         ec_slave_config_t *sc, /**< Slave configuration. */
-        uint16_t entry_index, /**< Index of the Pdo entry to register. */
-        uint8_t entry_subindex, /**< Subindex of the Pdo entry to register. */
+        uint16_t entry_index, /**< Index of the PDO entry to register. */
+        uint8_t entry_subindex, /**< Subindex of the PDO entry to register. */
         ec_domain_t *domain, /**< Domain. */
-        unsigned int *bit_position /**< Optional address if bit addressing 
+        unsigned int *bit_position /**< Optional address if bit addressing
                                  is desired */
         );
 
-/** Add an Sdo configuration.
+/** Configure distributed clocks.
  *
- * An Sdo configuration is stored in the slave configuration object and is
+ * Sets the AssignActivate word and the cycle and shift times for the sync
+ * signals.
+ *
+ * The AssignActivate word is vendor-specific and can be taken from the XML
+ * device description file (Device -> Dc -> AssignActivate). Set this to zero,
+ * if the slave shall be operated without distributed clocks (default).
+ */
+void ecrt_slave_config_dc(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        uint16_t assign_activate, /**< AssignActivate word. */
+        uint32_t sync0_cycle, /**< SYNC0 cycle time [ns]. */
+        uint32_t sync0_shift, /**< SYNC0 shift time [ns]. */
+        uint32_t sync1_cycle, /**< SYNC1 cycle time [ns]. */
+        uint32_t sync1_shift /**< SYNC1 shift time [ns]. */
+        );
+
+/** Add an SDO configuration.
+ *
+ * An SDO configuration is stored in the slave configuration object and is
  * downloaded to the slave whenever the slave is being configured by the
  * master. This usually happens once on master activation, but can be repeated
  * subsequently, for example after the slave's power supply failed.
  *
- * \attention The Sdos for Pdo assignment (\p 0x1C10 - \p 0x1C2F) and Pdo
+ * \attention The SDOs for PDO assignment (\p 0x1C10 - \p 0x1C2F) and PDO
  * mapping (\p 0x1600 - \p 0x17FF and \p 0x1A00 - \p 0x1BFF) should not be
  * configured with this function, because they are part of the slave
  * configuration done by the master. Please use ecrt_slave_config_pdos() and
  * friends instead.
  *
- * This is the generic function for adding an Sdo configuration. Please note
+ * This is the generic function for adding an SDO configuration. Please note
  * that the this function does not do any endianess correction. If
  * datatype-specific functions are needed (that automatically correct the
  * endianess), have a look at ecrt_slave_config_sdo8(),
  * ecrt_slave_config_sdo16() and ecrt_slave_config_sdo32().
  *
- * \return 0 in case of success, else < 0
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ecrt_slave_config_sdo(
         ec_slave_config_t *sc, /**< Slave configuration. */
-        uint16_t index, /**< Index of the Sdo to configure. */
-        uint8_t subindex, /**< Subindex of the Sdo to configure. */
+        uint16_t index, /**< Index of the SDO to configure. */
+        uint8_t subindex, /**< Subindex of the SDO to configure. */
         const uint8_t *data, /**< Pointer to the data. */
         size_t size /**< Size of the \a data. */
         );
@@ -682,7 +1193,9 @@ int ecrt_slave_config_sdo(
 /** Add a configuration value for an 8-bit SDO.
  *
  * \see ecrt_slave_config_sdo().
- * \return 0 in case of success, else < 0
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ecrt_slave_config_sdo8(
         ec_slave_config_t *sc, /**< Slave configuration */
@@ -694,7 +1207,9 @@ int ecrt_slave_config_sdo8(
 /** Add a configuration value for a 16-bit SDO.
  *
  * \see ecrt_slave_config_sdo().
- * \return 0 in case of success, else < 0
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ecrt_slave_config_sdo16(
         ec_slave_config_t *sc, /**< Slave configuration */
@@ -706,7 +1221,9 @@ int ecrt_slave_config_sdo16(
 /** Add a configuration value for a 32-bit SDO.
  *
  * \see ecrt_slave_config_sdo().
- * \return 0 in case of success, else < 0
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ecrt_slave_config_sdo32(
         ec_slave_config_t *sc, /**< Slave configuration */
@@ -715,32 +1232,98 @@ int ecrt_slave_config_sdo32(
         uint32_t value /**< Value to set. */
         );
 
-/** Create an Sdo request to exchange Sdos during realtime operation.
+/** Add configuration data for a complete SDO.
  *
- * The created Sdo request object is freed automatically when the master is
+ * The SDO data are transferred via CompleteAccess. Data for the first
+ * subindex (0) have to be included.
+ *
+ * \see ecrt_slave_config_sdo().
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
+ */
+int ecrt_slave_config_complete_sdo(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        uint16_t index, /**< Index of the SDO to configure. */
+        const uint8_t *data, /**< Pointer to the data. */
+        size_t size /**< Size of the \a data. */
+        );
+
+/** Create an SDO request to exchange SDOs during realtime operation.
+ *
+ * The created SDO request object is freed automatically when the master is
  * released.
  */
 ec_sdo_request_t *ecrt_slave_config_create_sdo_request(
         ec_slave_config_t *sc, /**< Slave configuration. */
-        uint16_t index, /**< Sdo index. */
-        uint8_t subindex, /**< Sdo subindex. */
+        uint16_t index, /**< SDO index. */
+        uint8_t subindex, /**< SDO subindex. */
+        size_t size /**< Data size to reserve. */
+        );
+
+/** Create an VoE handler to exchange vendor-specific data during realtime
+ * operation.
+ *
+ * The number of VoE handlers per slave configuration is not limited, but
+ * usually it is enough to create one for sending and one for receiving, if
+ * both can be done simultaneously.
+ *
+ * The created VoE handler object is freed automatically when the master is
+ * released.
+ */
+ec_voe_handler_t *ecrt_slave_config_create_voe_handler(
+        ec_slave_config_t *sc, /**< Slave configuration. */
         size_t size /**< Data size to reserve. */
         );
 
 /** Outputs the state of the slave configuration.
  *
- * Stores the state information in the given \a state structure.
+ * Stores the state information in the given \a state structure. The state
+ * information is updated by the master state machine, so it may take a few
+ * cycles, until it changes.
+ *
+ * \attention If the state of process data exchange shall be monitored in
+ * realtime, ecrt_domain_state() should be used.
  */
 void ecrt_slave_config_state(
         const ec_slave_config_t *sc, /**< Slave configuration */
         ec_slave_config_state_t *state /**< State object to write to. */
         );
 
+/** Add an SoE IDN configuration.
+ *
+ * A configuration for a Sercos-over-EtherCAT IDN is stored in the slave
+ * configuration object and is written to the slave whenever the slave is
+ * being configured by the master. This usually happens once on master
+ * activation, but can be repeated subsequently, for example after the slave's
+ * power supply failed.
+ *
+ * The \a idn parameter can be separated into serveral sections:
+ *  - Bit 15: Standard data (0) or Product data (1)
+ *  - Bit 14 - 12: Parameter set (0 - 7)
+ *  - Bit 11 - 0: Data block number (0 - 4095)
+ *
+ * Please note that the this function does not do any endianess correction.
+ * Multi-byte data have to be passed in EtherCAT endianess (little-endian).
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
+ */
+int ecrt_slave_config_idn(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        uint8_t drive_no, /**< Drive number. */
+        uint16_t idn, /**< SoE IDN. */
+        ec_al_state_t state, /**< AL state in which to write the IDN (PREOP or
+                               SAFEOP). */
+        const uint8_t *data, /**< Pointer to the data. */
+        size_t size /**< Size of the \a data. */
+        );
+
 /******************************************************************************
  * Domain methods
  *****************************************************************************/
 
-/** Registers a bunch of Pdo entries for a domain.
+/** Registers a bunch of PDO entries for a domain.
  *
  * \todo doc
  * \attention The registration array has to be terminated with an empty
@@ -749,25 +1332,27 @@ void ecrt_slave_config_state(
  */
 int ecrt_domain_reg_pdo_entry_list(
         ec_domain_t *domain, /**< Domain. */
-        const ec_pdo_entry_reg_t *pdo_entry_regs /**< Array of Pdo
+        const ec_pdo_entry_reg_t *pdo_entry_regs /**< Array of PDO
                                                    registrations. */
         );
+
+#ifdef __KERNEL__
 
 /** Returns the current size of the domain's process data.
  *
  * \return Size of the process data image.
  */
 size_t ecrt_domain_size(
-        ec_domain_t *domain /**< Domain. */
+        const ec_domain_t *domain /**< Domain. */
         );
 
 /** Provide external memory to store the domain's process data.
  *
- * Call this after all Pdo entries have been registered and before activating
+ * Call this after all PDO entries have been registered and before activating
  * the master.
  *
  * The size of the allocated memory must be at least ecrt_domain_size(), after
- * all Pdo entries have been registered.
+ * all PDO entries have been registered.
  */
 void ecrt_domain_external_memory(
         ec_domain_t *domain, /**< Domain. */
@@ -775,11 +1360,18 @@ void ecrt_domain_external_memory(
                           data in. */
         );
 
+#endif /* __KERNEL__ */
+
 /** Returns the domain's process data.
  *
- * If external memory was provided with ecrt_domain_external_memory(), the
- * returned pointer will contain the address of that memory. Otherwise it will
- * point to the internally allocated memory.
+ * - In kernel context: If external memory was provided with
+ * ecrt_domain_external_memory(), the returned pointer will contain the
+ * address of that memory. Otherwise it will point to the internally allocated
+ * memory. In the latter case, this method may not be called before
+ * ecrt_master_activate().
+ *
+ * - In userspace context: This method has to be called after
+ * ecrt_master_activate() to get the mapped domain process data memory.
  *
  * \return Pointer to the process data memory.
  */
@@ -810,6 +1402,8 @@ void ecrt_domain_queue(
 /** Reads the state of a domain.
  *
  * Stores the domain state in the given \a state structure.
+ *
+ * Using this method, the process data exchange can be monitored in realtime.
  */
 void ecrt_domain_state(
         const ec_domain_t *domain, /**< Domain. */
@@ -818,10 +1412,10 @@ void ecrt_domain_state(
         );
 
 /*****************************************************************************
- * Sdo request methods.
+ * SDO request methods.
  ****************************************************************************/
 
-/** Set the timeout for an Sdo request.
+/** Set the timeout for an SDO request.
  *
  * If the request cannot be processed in the specified time, if will be marked
  * as failed.
@@ -830,14 +1424,14 @@ void ecrt_domain_state(
  * the next call of this method.
  */
 void ecrt_sdo_request_timeout(
-        ec_sdo_request_t *req, /**< Sdo request. */
+        ec_sdo_request_t *req, /**< SDO request. */
         uint32_t timeout /**< Timeout in milliseconds. Zero means no
                            timeout. */
         );
 
-/** Access to the Sdo request's data.
+/** Access to the SDO request's data.
  *
- * This function returns a pointer to the request's internal Sdo data memory.
+ * This function returns a pointer to the request's internal SDO data memory.
  *
  * - After a read operation was successful, integer data can be evaluated using
  *   the EC_READ_*() macros as usual. Example:
@@ -853,45 +1447,51 @@ void ecrt_sdo_request_timeout(
  *   \endcode
  *
  * \attention The return value can be invalid during a read operation, because
- * the internal Sdo data memory could be re-allocated if the read Sdo data do
+ * the internal SDO data memory could be re-allocated if the read SDO data do
  * not fit inside.
  *
- * \return Pointer to the internal Sdo data memory.
+ * \return Pointer to the internal SDO data memory.
  */
 uint8_t *ecrt_sdo_request_data(
-        ec_sdo_request_t *req /**< Sdo request. */
+        ec_sdo_request_t *req /**< SDO request. */
         );
 
-/** Returns the current Sdo data size.
+/** Returns the current SDO data size.
  *
- * When the Sdo request is created, the data size is set to the size of the
+ * When the SDO request is created, the data size is set to the size of the
  * reserved memory. After a read operation the size is set to the size of the
  * read data. The size is not modified in any other situation.
  *
- * \return Sdo data size in bytes.
+ * \return SDO data size in bytes.
  */
 size_t ecrt_sdo_request_data_size(
-        const ec_sdo_request_t *req /**< Sdo request. */
+        const ec_sdo_request_t *req /**< SDO request. */
         );
 
-/** Get the current state of the Sdo request.
+/** Get the current state of the SDO request.
  *
  * \return Request state.
  */
-ec_sdo_request_state_t ecrt_sdo_request_state(
-    const ec_sdo_request_t *req /**< Sdo request. */
+#ifdef __KERNEL__
+ec_request_state_t ecrt_sdo_request_state(
+        const ec_sdo_request_t *req /**< SDO request. */
     );
+#else
+ec_request_state_t ecrt_sdo_request_state(
+        ec_sdo_request_t *req /**< SDO request. */
+    );
+#endif
 
-/** Schedule an Sdo write operation.
+/** Schedule an SDO write operation.
  *
  * \attention This method may not be called while ecrt_sdo_request_state()
  * returns EC_SDO_REQUEST_BUSY.
  */
 void ecrt_sdo_request_write(
-        ec_sdo_request_t *req /**< Sdo request. */
+        ec_sdo_request_t *req /**< SDO request. */
         );
 
-/** Schedule an Sdo read operation.
+/** Schedule an SDO read operation.
  *
  * \attention This method may not be called while ecrt_sdo_request_state()
  * returns EC_SDO_REQUEST_BUSY.
@@ -901,8 +1501,144 @@ void ecrt_sdo_request_write(
  * ecrt_sdo_request_state() returns EC_SDO_REQUEST_BUSY.
  */
 void ecrt_sdo_request_read(
-        ec_sdo_request_t *req /**< Sdo request. */
+        ec_sdo_request_t *req /**< SDO request. */
         );
+
+/*****************************************************************************
+ * VoE handler methods.
+ ****************************************************************************/
+
+/** Sets the VoE header for future send operations.
+ *
+ * A VoE message shall contain a 4-byte vendor ID, followed by a 2-byte vendor
+ * type at as header. These numbers can be set with this function. The values
+ * are valid and will be used for future send operations until the next call
+ * of this method.
+ */
+void ecrt_voe_handler_send_header(
+        ec_voe_handler_t *voe, /**< VoE handler. */
+        uint32_t vendor_id, /**< Vendor ID. */
+        uint16_t vendor_type /**< Vendor-specific type. */
+        );
+
+/** Reads the header data of a received VoE message.
+ *
+ * This method can be used to get the received VoE header information after a
+ * read operation has succeeded.
+ *
+ * The header information is stored at the memory given by the pointer
+ * parameters.
+ */
+void ecrt_voe_handler_received_header(
+        const ec_voe_handler_t *voe, /**< VoE handler. */
+        uint32_t *vendor_id, /**< Vendor ID. */
+        uint16_t *vendor_type /**< Vendor-specific type. */
+        );
+
+/** Access to the VoE handler's data.
+ *
+ * This function returns a pointer to the VoE handler's internal memory, that
+ * points to the actual VoE data right after the VoE header (see
+ * ecrt_voe_handler_send_header()).
+ *
+ * - After a read operation was successful, the memory contains the received
+ *   data. The size of the received data can be determined via
+ *   ecrt_voe_handler_data_size().
+ * - Before a write operation is triggered, the data have to be written to the
+ *   internal memory. Be sure, that the data fit into the memory. The reserved
+ *   memory size is a parameter of ecrt_slave_config_create_voe_handler().
+ *
+ * \attention The returned pointer is not necessarily persistent: After a read
+ * operation, the internal memory may have been reallocated. This can be
+ * avoided by reserving enough memory via the \a size parameter of
+ * ecrt_slave_config_create_voe_handler().
+ *
+ * \return Pointer to the internal memory.
+ */
+uint8_t *ecrt_voe_handler_data(
+        ec_voe_handler_t *voe /**< VoE handler. */
+        );
+
+/** Returns the current data size.
+ *
+ * The data size is the size of the VoE data without the header (see
+ * ecrt_voe_handler_send_header()).
+ *
+ * When the VoE handler is created, the data size is set to the size of the
+ * reserved memory. At a write operation, the data size is set to the number
+ * of bytes to write. After a read operation the size is set to the size of
+ * the read data. The size is not modified in any other situation.
+ *
+ * \return Data size in bytes.
+ */
+size_t ecrt_voe_handler_data_size(
+        const ec_voe_handler_t *voe /**< VoE handler. */
+        );
+
+/** Start a VoE write operation.
+ *
+ * After this function has been called, the ecrt_voe_handler_execute() method
+ * must be called in every bus cycle as long as it returns EC_REQUEST_BUSY. No
+ * other operation may be started while the handler is busy.
+ */
+void ecrt_voe_handler_write(
+        ec_voe_handler_t *voe, /**< VoE handler. */
+        size_t size /**< Number of bytes to write (without the VoE header). */
+        );
+
+/** Start a VoE read operation.
+ *
+ * After this function has been called, the ecrt_voe_handler_execute() method
+ * must be called in every bus cycle as long as it returns EC_REQUEST_BUSY. No
+ * other operation may be started while the handler is busy.
+ *
+ * The state machine queries the slave's send mailbox for new data to be send
+ * to the master. If no data appear within the EC_VOE_RESPONSE_TIMEOUT
+ * (defined in master/voe_handler.c), the operation fails.
+ *
+ * On success, the size of the read data can be determined via
+ * ecrt_voe_handler_data_size(), while the VoE header of the received data
+ * can be retrieved with ecrt_voe_handler_received_header().
+ */
+void ecrt_voe_handler_read(
+        ec_voe_handler_t *voe /**< VoE handler. */
+        );
+
+/** Start a VoE read operation without querying the sync manager status.
+ *
+ * After this function has been called, the ecrt_voe_handler_execute() method
+ * must be called in every bus cycle as long as it returns EC_REQUEST_BUSY. No
+ * other operation may be started while the handler is busy.
+ *
+ * The state machine queries the slave by sending an empty mailbox. The slave
+ * fills its data to the master in this mailbox. If no data appear within the
+ * EC_VOE_RESPONSE_TIMEOUT (defined in master/voe_handler.c), the operation
+ * fails.
+ *
+ * On success, the size of the read data can be determined via
+ * ecrt_voe_handler_data_size(), while the VoE header of the received data
+ * can be retrieved with ecrt_voe_handler_received_header().
+ */
+void ecrt_voe_handler_read_nosync(
+        ec_voe_handler_t *voe /**< VoE handler. */
+        );
+
+/** Execute the handler.
+ *
+ * This method executes the VoE handler. It has to be called in every bus cycle
+ * as long as it returns EC_REQUEST_BUSY.
+ *
+ * \return Handler state.
+ */
+ec_request_state_t ecrt_voe_handler_execute(
+    ec_voe_handler_t *voe /**< VoE handler. */
+    );
+
+/*****************************************************************************/
+
+#ifdef __cplusplus
+}
+#endif
 
 /******************************************************************************
  * Bitwise read/write macros
@@ -926,6 +1662,61 @@ void ecrt_sdo_request_read(
         if (VAL) *((uint8_t *) (DATA)) |=  (1 << (POS)); \
         else     *((uint8_t *) (DATA)) &= ~(1 << (POS)); \
     } while (0)
+
+/******************************************************************************
+ * Byte-swapping functions for user space
+ *****************************************************************************/
+
+#ifndef __KERNEL__
+
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+
+#define le16_to_cpu(x) x
+#define le32_to_cpu(x) x
+#define le64_to_cpu(x) x
+
+#define cpu_to_le16(x) x
+#define cpu_to_le32(x) x
+#define cpu_to_le64(x) x
+
+#elif __BYTE_ORDER == __BIG_ENDIAN
+
+#define swap16(x) \
+        ((uint16_t)( \
+        (((uint16_t)(x) & 0x00ffU) << 8) | \
+        (((uint16_t)(x) & 0xff00U) >> 8) ))
+#define swap32(x) \
+        ((uint32_t)( \
+        (((uint32_t)(x) & 0x000000ffUL) << 24) | \
+        (((uint32_t)(x) & 0x0000ff00UL) <<  8) | \
+        (((uint32_t)(x) & 0x00ff0000UL) >>  8) | \
+        (((uint32_t)(x) & 0xff000000UL) >> 24) ))
+#define swap64(x) \
+        ((uint64_t)( \
+        (((uint64_t)(x) & 0x00000000000000ffULL) << 56) | \
+        (((uint64_t)(x) & 0x000000000000ff00ULL) << 40) | \
+        (((uint64_t)(x) & 0x0000000000ff0000ULL) << 24) | \
+        (((uint64_t)(x) & 0x00000000ff000000ULL) <<  8) | \
+        (((uint64_t)(x) & 0x000000ff00000000ULL) >>  8) | \
+        (((uint64_t)(x) & 0x0000ff0000000000ULL) >> 24) | \
+        (((uint64_t)(x) & 0x00ff000000000000ULL) >> 40) | \
+        (((uint64_t)(x) & 0xff00000000000000ULL) >> 56) ))
+
+#define le16_to_cpu(x) swap16(x)
+#define le32_to_cpu(x) swap32(x)
+#define le64_to_cpu(x) swap64(x)
+
+#define cpu_to_le16(x) swap16(x)
+#define cpu_to_le32(x) swap32(x)
+#define cpu_to_le64(x) swap64(x)
+
+#endif
+
+#define le16_to_cpup(x) le16_to_cpu(*((uint16_t *)(x)))
+#define le32_to_cpup(x) le32_to_cpu(*((uint32_t *)(x)))
+#define le64_to_cpup(x) le64_to_cpu(*((uint64_t *)(x)))
+
+#endif /* ifndef __KERNEL__ */
 
 /******************************************************************************
  * Read macros
@@ -977,6 +1768,22 @@ void ecrt_sdo_request_read(
  */
 #define EC_READ_S32(DATA) \
      ((int32_t) le32_to_cpup((void *) (DATA)))
+
+/** Read a 64-bit unsigned value from EtherCAT data.
+ *
+ * \param DATA EtherCAT data pointer
+ * \return EtherCAT data value
+ */
+#define EC_READ_U64(DATA) \
+     ((uint64_t) le64_to_cpup((void *) (DATA)))
+
+/** Read a 64-bit signed value from EtherCAT data.
+ *
+ * \param DATA EtherCAT data pointer
+ * \return EtherCAT data value
+ */
+#define EC_READ_S64(DATA) \
+     ((int64_t) le64_to_cpup((void *) (DATA)))
 
 /******************************************************************************
  * Write macros
@@ -1032,6 +1839,23 @@ void ecrt_sdo_request_read(
  * \param VAL new value
  */
 #define EC_WRITE_S32(DATA, VAL) EC_WRITE_U32(DATA, VAL)
+
+/** Write a 64-bit unsigned value to EtherCAT data.
+ *
+ * \param DATA EtherCAT data pointer
+ * \param VAL new value
+ */
+#define EC_WRITE_U64(DATA, VAL) \
+    do { \
+        *((uint64_t *) (DATA)) = cpu_to_le64((uint64_t) (VAL)); \
+    } while (0)
+
+/** Write a 64-bit signed value to EtherCAT data.
+ *
+ * \param DATA EtherCAT data pointer
+ * \param VAL new value
+ */
+#define EC_WRITE_S64(DATA, VAL) EC_WRITE_U64(DATA, VAL)
 
 /*****************************************************************************/
 

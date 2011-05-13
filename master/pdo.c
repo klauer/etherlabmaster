@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -39,15 +35,16 @@
 /*****************************************************************************/
 
 #include <linux/slab.h>
+#include <linux/err.h>
 
 #include "pdo.h"
 
 /*****************************************************************************/
 
-/** Pdo constructor.
+/** PDO constructor.
  */
 void ec_pdo_init(
-        ec_pdo_t *pdo /**< EtherCAT Pdo */
+        ec_pdo_t *pdo /**< EtherCAT PDO */
         )
 {
     pdo->sync_index = -1; // not assigned 
@@ -57,19 +54,29 @@ void ec_pdo_init(
 
 /*****************************************************************************/
 
-/** Pdo copy constructor.
+/** PDO copy constructor.
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
-int ec_pdo_init_copy(ec_pdo_t *pdo, const ec_pdo_t *other_pdo)
+int ec_pdo_init_copy(
+        ec_pdo_t *pdo, /**< PDO to create. */
+        const ec_pdo_t *other_pdo /**< PDO to copy from. */
+        )
 {
+    int ret = 0;
+
     pdo->index = other_pdo->index;
     pdo->sync_index = other_pdo->sync_index;
     pdo->name = NULL;
     INIT_LIST_HEAD(&pdo->entries);
 
-    if (ec_pdo_set_name(pdo, other_pdo->name))
+    ret = ec_pdo_set_name(pdo, other_pdo->name);
+    if (ret < 0)
         goto out_return;
 
-    if (ec_pdo_copy_entries(pdo, other_pdo))
+    ret = ec_pdo_copy_entries(pdo, other_pdo);
+    if (ret < 0)
         goto out_clear;
 
     return 0;
@@ -77,14 +84,14 @@ int ec_pdo_init_copy(ec_pdo_t *pdo, const ec_pdo_t *other_pdo)
 out_clear:
     ec_pdo_clear(pdo);
 out_return:
-    return -1;
+    return ret;
 }
 
 /*****************************************************************************/
 
-/** Pdo destructor.
+/** PDO destructor.
  */
-void ec_pdo_clear(ec_pdo_t *pdo /**< EtherCAT Pdo. */)
+void ec_pdo_clear(ec_pdo_t *pdo /**< EtherCAT PDO. */)
 {
     if (pdo->name)
         kfree(pdo->name);
@@ -94,13 +101,13 @@ void ec_pdo_clear(ec_pdo_t *pdo /**< EtherCAT Pdo. */)
 
 /*****************************************************************************/
 
-/** Clear Pdo entry list.
+/** Clear PDO entry list.
  */
-void ec_pdo_clear_entries(ec_pdo_t *pdo /**< EtherCAT Pdo. */)
+void ec_pdo_clear_entries(ec_pdo_t *pdo /**< EtherCAT PDO. */)
 {
     ec_pdo_entry_t *entry, *next;
 
-    // free all Pdo entries
+    // free all PDO entries
     list_for_each_entry_safe(entry, next, &pdo->entries, list) {
         list_del(&entry->list);
         ec_pdo_entry_clear(entry);
@@ -110,10 +117,13 @@ void ec_pdo_clear_entries(ec_pdo_t *pdo /**< EtherCAT Pdo. */)
 
 /*****************************************************************************/
 
-/** Set Pdo name.
+/** Set PDO name.
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ec_pdo_set_name(
-        ec_pdo_t *pdo, /**< Pdo. */
+        ec_pdo_t *pdo, /**< PDO. */
         const char *name /**< New name. */
         )
 {
@@ -127,8 +137,8 @@ int ec_pdo_set_name(
 
     if (name && (len = strlen(name))) {
         if (!(pdo->name = (char *) kmalloc(len + 1, GFP_KERNEL))) {
-            EC_ERR("Failed to allocate Pdo name.\n");
-            return -1;
+            EC_ERR("Failed to allocate PDO name.\n");
+            return -ENOMEM;
         }
         memcpy(pdo->name, name, len + 1);
     } else {
@@ -140,20 +150,22 @@ int ec_pdo_set_name(
 
 /*****************************************************************************/
 
-/** Add a new Pdo entry to the configuration.
+/** Add a new PDO entry to the configuration.
+ *
+ * \retval Pointer to the added entry, otherwise a ERR_PTR() code.
  */
 ec_pdo_entry_t *ec_pdo_add_entry(
-        ec_pdo_t *pdo,
-        uint16_t index,
-        uint8_t subindex,
-        uint8_t bit_length
+        ec_pdo_t *pdo, /**< PDO. */
+        uint16_t index, /**< New entry's index. */
+        uint8_t subindex, /**< New entry's subindex. */
+        uint8_t bit_length /**< New entry's bit length. */
         )
 {
     ec_pdo_entry_t *entry;
 
     if (!(entry = kmalloc(sizeof(ec_pdo_entry_t), GFP_KERNEL))) {
-        EC_ERR("Failed to allocate memory for Pdo entry.\n");
-        return NULL;
+        EC_ERR("Failed to allocate memory for PDO entry.\n");
+        return ERR_PTR(-ENOMEM);
     }
 
     ec_pdo_entry_init(entry);
@@ -166,24 +178,32 @@ ec_pdo_entry_t *ec_pdo_add_entry(
 
 /*****************************************************************************/
 
-/** Copy Pdo entries from another Pdo.
+/** Copy PDO entries from another PDO.
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
-int ec_pdo_copy_entries(ec_pdo_t *pdo, const ec_pdo_t *other)
+int ec_pdo_copy_entries(
+        ec_pdo_t *pdo, /**< PDO whos entries shall be replaced. */
+        const ec_pdo_t *other /**< Pdo with entries to copy. */
+        )
 {
     ec_pdo_entry_t *entry, *other_entry;
+    int ret;
 
     ec_pdo_clear_entries(pdo);
 
     list_for_each_entry(other_entry, &other->entries, list) {
         if (!(entry = (ec_pdo_entry_t *)
                     kmalloc(sizeof(ec_pdo_entry_t), GFP_KERNEL))) {
-            EC_ERR("Failed to allocate memory for Pdo entry copy.\n");
-            return -1;
+            EC_ERR("Failed to allocate memory for PDO entry copy.\n");
+            return -ENOMEM;
         }
 
-        if (ec_pdo_entry_init_copy(entry, other_entry)) {
+        ret = ec_pdo_entry_init_copy(entry, other_entry);
+        if (ret < 0) {
             kfree(entry);
-            return -1;
+            return ret;
         }
 
         list_add_tail(&entry->list, &pdo->entries);
@@ -194,14 +214,14 @@ int ec_pdo_copy_entries(ec_pdo_t *pdo, const ec_pdo_t *other)
 
 /*****************************************************************************/
 
-/** Compares the entries of two Pdos.
+/** Compares the entries of two PDOs.
  *
- * \retval 1 The entries of the given Pdos are equal.
- * \retval 0 The entries of the given Pdos differ.
+ * \retval 1 The entries of the given PDOs are equal.
+ * \retval 0 The entries of the given PDOs differ.
  */
 int ec_pdo_equal_entries(
-        const ec_pdo_t *pdo1, /**< First Pdo. */
-        const ec_pdo_t *pdo2 /**< Second Pdo. */
+        const ec_pdo_t *pdo1, /**< First PDO. */
+        const ec_pdo_t *pdo2 /**< Second PDO. */
         )
 {
     const struct list_head *head1, *head2, *item1, *item2;
@@ -230,12 +250,12 @@ int ec_pdo_equal_entries(
 
 /*****************************************************************************/
 
-/** Get the number of Pdo entries.
+/** Get the number of PDO entries.
  *
- * \return Number of Pdo entries.
+ * \return Number of PDO entries.
  */
 unsigned int ec_pdo_entry_count(
-        const ec_pdo_t *pdo /**< Pdo. */
+        const ec_pdo_t *pdo /**< PDO. */
         )
 {
     const ec_pdo_entry_t *entry;
@@ -250,12 +270,12 @@ unsigned int ec_pdo_entry_count(
 
 /*****************************************************************************/
 
-/** Finds a Pdo entry via its position in the list.
+/** Finds a PDO entry via its position in the list.
  *
  * Const version.
  */
 const ec_pdo_entry_t *ec_pdo_find_entry_by_pos_const(
-        const ec_pdo_t *pdo, /**< Pdo. */
+        const ec_pdo_t *pdo, /**< PDO. */
         unsigned int pos /**< Position in the list. */
         )
 {
@@ -268,6 +288,28 @@ const ec_pdo_entry_t *ec_pdo_find_entry_by_pos_const(
     }
 
     return NULL;
+}
+
+/*****************************************************************************/
+
+/** Outputs the PDOs in the list.
+ */
+void ec_pdo_print_entries(
+        const ec_pdo_t *pdo /**< PDO. */
+        )
+{
+    const ec_pdo_entry_t *entry;
+
+    if (list_empty(&pdo->entries)) {
+        printk("(none)");
+    } else {
+        list_for_each_entry(entry, &pdo->entries, list) {
+            printk("0x%04X:%02X/%u",
+                    entry->index, entry->subindex, entry->bit_length);
+            if (entry->list.next != &pdo->entries)
+                printk(" ");
+        }
+    }
 }
 
 /*****************************************************************************/

@@ -1,6 +1,29 @@
 /*****************************************************************************
  *
- * $Id$
+ *  $Id$
+ *
+ *  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+ *
+ *  This file is part of the IgH EtherCAT Master.
+ *
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
+ *
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  ****************************************************************************/
 
@@ -9,7 +32,7 @@
 using namespace std;
 
 #include "CommandSiiRead.h"
-#include "byteorder.h"
+#include "MasterDevice.h"
 
 /*****************************************************************************/
 
@@ -20,38 +43,38 @@ CommandSiiRead::CommandSiiRead():
 
 /*****************************************************************************/
 
-string CommandSiiRead::helpString() const
+string CommandSiiRead::helpString(const string &binaryBaseName) const
 {
     stringstream str;
 
-    str << getName() << " [OPTIONS]" << endl
-    	<< endl
-    	<< getBriefDescription() << endl
-    	<< endl
+    str << binaryBaseName << " " << getName() << " [OPTIONS]" << endl
+        << endl
+        << getBriefDescription() << endl
+        << endl
         << "This command requires a single slave to be selected." << endl
-    	<< endl
-    	<< "Without the --verbose option, binary SII contents are" << endl
-		<< "output." << endl
-    	<< endl
-    	<< "With the --verbose option given, a textual representation" << endl
-		<< "of the data is output, that is separated by SII category" << endl
-		<< "names." << endl
-    	<< endl
-    	<< "Command-specific options:" << endl
+        << endl
+        << "Without the --verbose option, binary SII contents are" << endl
+        << "output." << endl
+        << endl
+        << "With the --verbose option given, a textual representation" << endl
+        << "of the data is output, that is separated by SII category" << endl
+        << "names." << endl
+        << endl
+        << "Command-specific options:" << endl
         << "  --alias    -a <alias>" << endl
         << "  --position -p <pos>    Slave selection. See the help of" << endl
         << "                         the 'slaves' command." << endl
-    	<< "  --verbose  -v          Output textual data with" << endl
-		<< "                         category names." << endl
-    	<< endl
-		<< numericInfo();
+        << "  --verbose  -v          Output textual data with" << endl
+        << "                         category names." << endl
+        << endl
+        << numericInfo();
 
-	return str.str();
+    return str.str();
 }
 
 /****************************************************************************/
 
-void CommandSiiRead::execute(MasterDevice &m, const StringVector &args)
+void CommandSiiRead::execute(const StringVector &args)
 {
     SlaveList slaves;
     ec_ioctl_slave_t *slave;
@@ -61,6 +84,12 @@ void CommandSiiRead::execute(MasterDevice &m, const StringVector &args)
     uint16_t categoryType, categorySize;
     stringstream err;
 
+    if (args.size()) {
+        err << "'" << getName() << "' takes no arguments!";
+        throwInvalidUsageException(err);
+    }
+
+    MasterDevice m(getSingleMasterIndex());
     m.open(MasterDevice::Read);
     slaves = selectedSlaves(m);
 
@@ -77,12 +106,12 @@ void CommandSiiRead::execute(MasterDevice &m, const StringVector &args)
     data.nwords = slave->sii_nwords;
     data.words = new uint16_t[data.nwords];
 
-	try {
-		m.readSii(&data);
-	} catch (MasterDeviceException &e) {
+    try {
+        m.readSii(&data);
+    } catch (MasterDeviceException &e) {
         delete [] data.words;
-		throw e;
-	}
+        throw e;
+    }
 
     if (getVerbosity() == Verbose) {
         cout << "SII Area:" << hex << setfill('0');
@@ -99,7 +128,7 @@ void CommandSiiRead::execute(MasterDevice &m, const StringVector &args)
         if (data.nwords > 0x0040U) {
             // cycle through categories
             categoryHeader = data.words + 0x0040U;
-            categoryType = le16tocpu(*categoryHeader);
+            categoryType = le16_to_cpup(categoryHeader);
             while (categoryType != 0xffff) {
                 cout << "SII Category 0x" << hex
                     << setw(4) << categoryType
@@ -109,7 +138,7 @@ void CommandSiiRead::execute(MasterDevice &m, const StringVector &args)
                     err << "SII data seem to be corrupted!";
                     throwCommandException(err);
                 }
-                categorySize = le16tocpu(*(categoryHeader + 1));
+                categorySize = le16_to_cpup(categoryHeader + 1);
                 cout << ", " << dec << categorySize << " words" << flush;
 
                 if (categoryHeader + 2 + categorySize
@@ -136,7 +165,7 @@ void CommandSiiRead::execute(MasterDevice &m, const StringVector &args)
                     throwCommandException(err);
                 }
                 categoryHeader += 2 + categorySize;
-                categoryType = le16tocpu(*categoryHeader);
+                categoryType = le16_to_cpup(categoryHeader);
             }
         }
     } else {

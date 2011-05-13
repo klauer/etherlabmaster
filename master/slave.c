@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -71,41 +67,65 @@ void ec_slave_init(
         )
 {
     unsigned int i;
+    int ret;
 
     slave->master = master;
     slave->ring_position = ring_position;
     slave->station_address = station_address;
+    slave->effective_alias = 0x0000;
 
     slave->config = NULL;
     slave->requested_state = EC_SLAVE_STATE_PREOP;
     slave->current_state = EC_SLAVE_STATE_UNKNOWN;
     slave->error_flag = 0;
     slave->force_config = 0;
+    slave->configured_rx_mailbox_offset = 0x0000;
+    slave->configured_rx_mailbox_size = 0x0000;
+    slave->configured_tx_mailbox_offset = 0x0000;
+    slave->configured_tx_mailbox_size = 0x0000;
 
     slave->base_type = 0;
     slave->base_revision = 0;
     slave->base_build = 0;
     slave->base_fmmu_count = 0;
+    slave->base_sync_count = 0;
 
     for (i = 0; i < EC_MAX_PORTS; i++) {
-        slave->ports[i].dl_link = 0;
-        slave->ports[i].dl_loop = 0;
-        slave->ports[i].dl_signal = 0;
+        slave->ports[i].desc = EC_PORT_NOT_IMPLEMENTED;
+
+        slave->ports[i].link.link_up = 0;
+        slave->ports[i].link.loop_closed = 0;
+        slave->ports[i].link.signal_detected = 0;
         slave->sii.physical_layer[i] = 0xFF;
+
+        slave->ports[i].receive_time = 0U;
+
+        slave->ports[i].next_slave = NULL;
+        slave->ports[i].delay_to_next_dc = 0U;
     }
+
+    slave->base_fmmu_bit_operation = 0;
+    slave->base_dc_supported = 0;
+    slave->base_dc_range = EC_DC_32;
+    slave->has_dc_system_time = 0;
+    slave->transmission_delay = 0U;
 
     slave->sii_words = NULL;
     slave->sii_nwords = 0;
 
-    slave->sii.alias = 0;
-    slave->sii.vendor_id = 0;
-    slave->sii.product_code = 0;
-    slave->sii.revision_number = 0;
-    slave->sii.serial_number = 0;
-    slave->sii.rx_mailbox_offset = 0;
-    slave->sii.rx_mailbox_size = 0;
-    slave->sii.tx_mailbox_offset = 0;
-    slave->sii.tx_mailbox_size = 0;
+    slave->sii.alias = 0x0000;
+    slave->sii.vendor_id = 0x00000000;
+    slave->sii.product_code = 0x00000000;
+    slave->sii.revision_number = 0x00000000;
+    slave->sii.serial_number = 0x00000000;
+    slave->sii.boot_rx_mailbox_offset = 0x0000;
+    slave->sii.boot_rx_mailbox_size = 0x0000;
+    slave->sii.boot_tx_mailbox_offset = 0x0000;
+    slave->sii.boot_tx_mailbox_size = 0x0000;
+    slave->sii.std_rx_mailbox_offset = 0x0000;
+    slave->sii.std_rx_mailbox_size = 0x0000;
+    slave->sii.std_tx_mailbox_offset = 0x0000;
+    slave->sii.std_tx_mailbox_size = 0x0000;
     slave->sii.mailbox_protocols = 0;
 
     slave->sii.strings = NULL;
@@ -129,6 +149,30 @@ void ec_slave_init(
 
     slave->sdo_dictionary_fetched = 0;
     slave->jiffies_preop = 0;
+
+    INIT_LIST_HEAD(&slave->slave_sdo_requests);
+    init_waitqueue_head(&slave->sdo_queue);
+
+    INIT_LIST_HEAD(&slave->foe_requests);
+    init_waitqueue_head(&slave->foe_queue);
+
+    INIT_LIST_HEAD(&slave->soe_requests);
+    init_waitqueue_head(&slave->soe_queue);
+
+    // init datagram
+    ec_datagram_init(&slave->datagram);
+    snprintf(slave->datagram.name, EC_DATAGRAM_NAME_SIZE,
+            "slave%u-fsm", slave->ring_position);
+    ret = ec_datagram_prealloc(&slave->datagram, EC_MAX_DATA_SIZE);
+    if (ret < 0) {
+        ec_datagram_clear(&slave->datagram);
+        EC_SLAVE_ERR(slave, "Failed to allocate FSM datagram.\n");
+        return;
+    }
+    ec_mbox_init(&slave->mbox,&slave->datagram);
+
+    // create state machine object
+    ec_fsm_slave_init(&slave->fsm, slave, &slave->mbox);
 }
 
 /*****************************************************************************/
@@ -144,10 +188,48 @@ void ec_slave_clear(ec_slave_t *slave /**< EtherCAT slave */)
     unsigned int i;
     ec_pdo_t *pdo, *next_pdo;
 
+    // abort all pending requests
+
+    while (!list_empty(&slave->slave_sdo_requests)) {
+        ec_master_sdo_request_t *request =
+            list_entry(slave->slave_sdo_requests.next,
+                ec_master_sdo_request_t, list);
+        list_del_init(&request->list); // dequeue
+        EC_SLAVE_WARN(slave, "Discarding SDO request %p,"
+                " slave about to be deleted.\n",request);
+        request->req.state = EC_INT_REQUEST_FAILURE;
+        kref_put(&request->refcount,ec_master_sdo_request_release);
+        wake_up(&slave->sdo_queue);
+    }
+
+    while (!list_empty(&slave->foe_requests)) {
+        ec_master_foe_request_t *request =
+            list_entry(slave->foe_requests.next,
+                ec_master_foe_request_t, list);
+        list_del_init(&request->list); // dequeue
+        EC_SLAVE_WARN(slave, "Discarding FoE request,"
+                " slave about to be deleted.\n");
+        request->req.state = EC_INT_REQUEST_FAILURE;
+        kref_put(&request->refcount,ec_master_foe_request_release);
+        wake_up(&slave->foe_queue);
+    }
+
+    while (!list_empty(&slave->soe_requests)) {
+        ec_master_soe_request_t *request =
+            list_entry(slave->soe_requests.next,
+                ec_master_soe_request_t, list);
+        list_del_init(&request->list); // dequeue
+        EC_SLAVE_WARN(slave, "Discarding SoE request,"
+                " slave about to be deleted.\n");
+        request->req.state = EC_INT_REQUEST_FAILURE;
+        kref_put(&request->refcount,ec_master_soe_request_release);
+        wake_up(&slave->soe_queue);
+    }
+
     if (slave->config)
         ec_slave_config_detach(slave->config);
 
-    // free all Sdos
+    // free all SDOs
     list_for_each_entry_safe(sdo, next_sdo, &slave->sdo_dictionary, list) {
         list_del(&sdo->list);
         ec_sdo_clear(sdo);
@@ -164,7 +246,7 @@ void ec_slave_clear(ec_slave_t *slave /**< EtherCAT slave */)
     // free all sync managers
     ec_slave_clear_sync_managers(slave);
 
-    // free all SII Pdos
+    // free all SII PDOs
     list_for_each_entry_safe(pdo, next_pdo, &slave->sii.pdos, list) {
         list_del(&pdo->list);
         ec_pdo_clear(pdo);
@@ -173,6 +255,8 @@ void ec_slave_clear(ec_slave_t *slave /**< EtherCAT slave */)
 
     if (slave->sii_words)
         kfree(slave->sii_words);
+    ec_fsm_slave_clear(&slave->fsm);
+    ec_mbox_clear(&slave->mbox);
 }
 
 /*****************************************************************************/
@@ -206,10 +290,9 @@ void ec_slave_set_state(ec_slave_t *slave, /**< EtherCAT slave */
         if (slave->master->debug_level) {
             char old_state[EC_STATE_STRING_SIZE],
                 cur_state[EC_STATE_STRING_SIZE];
-            ec_state_string(slave->current_state, old_state);
-            ec_state_string(new_state, cur_state);
-            EC_DBG("Slave %u: %s -> %s.\n",
-                   slave->ring_position, old_state, cur_state);
+            ec_state_string(slave->current_state, old_state, 0);
+            ec_state_string(new_state, cur_state, 0);
+            EC_SLAVE_DBG(slave, 0, "%s -> %s.\n", old_state, cur_state);
         }
         slave->current_state = new_state;
     }
@@ -243,45 +326,47 @@ int ec_slave_fetch_sii_strings(
         size_t data_size /**< number of bytes */
         )
 {
-    int i;
+    int i, err;
     size_t size;
     off_t offset;
 
     slave->sii.string_count = data[0];
 
-    if (!slave->sii.string_count)
-        return 0;
-
-    if (!(slave->sii.strings =
-                kmalloc(sizeof(char *) * slave->sii.string_count,
-                    GFP_KERNEL))) {
-        EC_ERR("Failed to allocate string array memory.\n");
-        goto out_zero;
-    }
-
-    offset = 1;
-    for (i = 0; i < slave->sii.string_count; i++) {
-        size = data[offset];
-        // allocate memory for string structure and data at a single blow
-        if (!(slave->sii.strings[i] =
-                    kmalloc(sizeof(char) * size + 1, GFP_KERNEL))) {
-            EC_ERR("Failed to allocate string memory.\n");
-            goto out_free;
+    if (slave->sii.string_count) {
+        if (!(slave->sii.strings =
+                    kmalloc(sizeof(char *) * slave->sii.string_count,
+                        GFP_KERNEL))) {
+            EC_SLAVE_ERR(slave, "Failed to allocate string array memory.\n");
+            err = -ENOMEM;
+            goto out_zero;
         }
-        memcpy(slave->sii.strings[i], data + offset + 1, size);
-        slave->sii.strings[i][size] = 0x00; // append binary zero
-        offset += 1 + size;
+
+        offset = 1;
+        for (i = 0; i < slave->sii.string_count; i++) {
+            size = data[offset];
+            // allocate memory for string structure and data at a single blow
+            if (!(slave->sii.strings[i] =
+                        kmalloc(sizeof(char) * size + 1, GFP_KERNEL))) {
+                EC_SLAVE_ERR(slave, "Failed to allocate string memory.\n");
+                err = -ENOMEM;
+                goto out_free;
+            }
+            memcpy(slave->sii.strings[i], data + offset + 1, size);
+            slave->sii.strings[i][size] = 0x00; // append binary zero
+            offset += 1 + size;
+        }
     }
 
     return 0;
 
 out_free:
-    for (i--; i >= 0; i--) kfree(slave->sii.strings[i]);
+    for (i--; i >= 0; i--)
+        kfree(slave->sii.strings[i]);
     kfree(slave->sii.strings);
     slave->sii.strings = NULL;
 out_zero:
     slave->sii.string_count = 0;
-    return -1;
+    return err;
 }
 
 /*****************************************************************************/
@@ -301,9 +386,9 @@ int ec_slave_fetch_sii_general(
     uint8_t flags;
 
     if (data_size != 32) {
-        EC_ERR("Wrong size of general category (%u/32) in slave %u.\n",
-                data_size, slave->ring_position);
-        return -1;
+        EC_SLAVE_ERR(slave, "Wrong size of general category (%zu/32).\n",
+                data_size);
+        return -EINVAL;
     }
 
     slave->sii.group = ec_slave_sii_string(slave, data[0]);
@@ -356,9 +441,9 @@ int ec_slave_fetch_sii_syncs(
 
     // one sync manager struct is 4 words long
     if (data_size % 8) {
-        EC_ERR("Invalid SII sync manager category size %u in slave %u.\n",
-                data_size, slave->ring_position);
-        return -1;
+        EC_SLAVE_ERR(slave, "Invalid SII sync manager category size %zu.\n",
+                data_size);
+        return -EINVAL;
     }
 
     count = data_size / 8;
@@ -366,14 +451,15 @@ int ec_slave_fetch_sii_syncs(
     if (count) {
         total_count = count + slave->sii.sync_count;
         if (total_count > EC_MAX_SYNC_MANAGERS) {
-            EC_ERR("Exceeded maximum number of sync managers!\n");
-            return -1;
+            EC_SLAVE_ERR(slave, "Exceeded maximum number of"
+                    " sync managers!\n");
+            return -EOVERFLOW;
         }
         memsize = sizeof(ec_sync_t) * total_count;
         if (!(syncs = kmalloc(memsize, GFP_KERNEL))) {
-            EC_ERR("Failed to allocate %u bytes for sync managers.\n",
-                    memsize);
-            return -1;
+            EC_SLAVE_ERR(slave, "Failed to allocate %zu bytes"
+                    " for sync managers.\n", memsize);
+            return -ENOMEM;
         }
 
         for (i = 0; i < slave->sii.sync_count; i++)
@@ -403,7 +489,7 @@ int ec_slave_fetch_sii_syncs(
 /*****************************************************************************/
 
 /**
-   Fetches data from a [RT]XPdo category.
+   Fetches data from a [RT]xPDO category.
    \return 0 in case of success, else < 0
 */
 
@@ -411,28 +497,30 @@ int ec_slave_fetch_sii_pdos(
         ec_slave_t *slave, /**< EtherCAT slave */
         const uint8_t *data, /**< category data */
         size_t data_size, /**< number of bytes */
-        ec_direction_t dir /**< Pdo direction. */
+        ec_direction_t dir /**< PDO direction. */
         )
 {
+    int ret;
     ec_pdo_t *pdo;
     ec_pdo_entry_t *entry;
     unsigned int entry_count, i;
 
     while (data_size >= 8) {
         if (!(pdo = kmalloc(sizeof(ec_pdo_t), GFP_KERNEL))) {
-            EC_ERR("Failed to allocate Pdo memory.\n");
-            return -1;
+            EC_SLAVE_ERR(slave, "Failed to allocate PDO memory.\n");
+            return -ENOMEM;
         }
 
         ec_pdo_init(pdo);
         pdo->index = EC_READ_U16(data);
         entry_count = EC_READ_U8(data + 2);
         pdo->sync_index = EC_READ_U8(data + 3);
-        if (ec_pdo_set_name(pdo,
-                ec_slave_sii_string(slave, EC_READ_U8(data + 5)))) {
+        ret = ec_pdo_set_name(pdo,
+                ec_slave_sii_string(slave, EC_READ_U8(data + 5)));
+        if (ret) {
             ec_pdo_clear(pdo);
             kfree(pdo);
-            return -1;
+            return ret;
         }
         list_add_tail(&pdo->list, &slave->sii.pdos);
 
@@ -441,18 +529,19 @@ int ec_slave_fetch_sii_pdos(
 
         for (i = 0; i < entry_count; i++) {
             if (!(entry = kmalloc(sizeof(ec_pdo_entry_t), GFP_KERNEL))) {
-                EC_ERR("Failed to allocate Pdo entry memory.\n");
-                return -1;
+                EC_SLAVE_ERR(slave, "Failed to allocate PDO entry memory.\n");
+                return -ENOMEM;
             }
 
             ec_pdo_entry_init(entry);
             entry->index = EC_READ_U16(data);
             entry->subindex = EC_READ_U8(data + 2);
-            if (ec_pdo_entry_set_name(entry,
-                    ec_slave_sii_string(slave, EC_READ_U8(data + 3)))) {
+            ret = ec_pdo_entry_set_name(entry,
+                    ec_slave_sii_string(slave, EC_READ_U8(data + 3)));
+            if (ret) {
                 ec_pdo_entry_clear(entry);
                 kfree(entry);
-                return -1;
+                return ret;
             }
             entry->bit_length = EC_READ_U8(data + 5);
             list_add_tail(&entry->list, &pdo->entries);
@@ -461,18 +550,19 @@ int ec_slave_fetch_sii_pdos(
             data += 8;
         }
 
-        // if sync manager index is positive, the Pdo is mapped by default
+        // if sync manager index is positive, the PDO is mapped by default
         if (pdo->sync_index >= 0) {
             ec_sync_t *sync;
 
             if (!(sync = ec_slave_get_sync(slave, pdo->sync_index))) {
-                EC_ERR("Invalid SM index %i for Pdo 0x%04X in slave %u.",
-                        pdo->sync_index, pdo->index, slave->ring_position);
-                return -1;
+                EC_SLAVE_ERR(slave, "Invalid SM index %i for PDO 0x%04X.",
+                        pdo->sync_index, pdo->index);
+                return -ENOENT;
             }
 
-            if (ec_pdo_list_add_pdo_copy(&sync->pdos, pdo))
-                return -1;
+            ret = ec_pdo_list_add_pdo_copy(&sync->pdos, pdo);
+            if (ret)
+                return ret;
         }
     }
 
@@ -495,9 +585,7 @@ char *ec_slave_sii_string(
         return NULL;
 
     if (index >= slave->sii.string_count) {
-        if (slave->master->debug_level)
-            EC_WARN("String %u not found in slave %u.\n",
-                    index, slave->ring_position);
+        EC_SLAVE_DBG(slave, 1, "String %u not found.\n", index);
         return NULL;
     }
 
@@ -525,11 +613,11 @@ ec_sync_t *ec_slave_get_sync(
 /*****************************************************************************/
 
 /**
-   Counts the total number of Sdos and entries in the dictionary.
+   Counts the total number of SDOs and entries in the dictionary.
 */
 
 void ec_slave_sdo_dict_info(const ec_slave_t *slave, /**< EtherCAT slave */
-                            unsigned int *sdo_count, /**< number of Sdos */
+                            unsigned int *sdo_count, /**< number of SDOs */
                             unsigned int *entry_count /**< total number of
                                                          entries */
                             )
@@ -552,13 +640,13 @@ void ec_slave_sdo_dict_info(const ec_slave_t *slave, /**< EtherCAT slave */
 /*****************************************************************************/
 
 /**
- * Get an Sdo from the dictionary.
- * \returns The desired Sdo, or NULL.
+ * Get an SDO from the dictionary.
+ * \returns The desired SDO, or NULL.
  */
 
 ec_sdo_t *ec_slave_get_sdo(
         ec_slave_t *slave, /**< EtherCAT slave */
-        uint16_t index /**< Sdo index */
+        uint16_t index /**< SDO index */
         )
 {
     ec_sdo_t *sdo;
@@ -575,16 +663,16 @@ ec_sdo_t *ec_slave_get_sdo(
 /*****************************************************************************/
 
 /**
- * Get an Sdo from the dictionary.
+ * Get an SDO from the dictionary.
  *
  * const version.
  *
- * \returns The desired Sdo, or NULL.
+ * \returns The desired SDO, or NULL.
  */
 
 const ec_sdo_t *ec_slave_get_sdo_const(
         const ec_slave_t *slave, /**< EtherCAT slave */
-        uint16_t index /**< Sdo index */
+        uint16_t index /**< SDO index */
         )
 {
     const ec_sdo_t *sdo;
@@ -600,13 +688,13 @@ const ec_sdo_t *ec_slave_get_sdo_const(
 
 /*****************************************************************************/
 
-/** Get an Sdo from the dictionary, given its position in the list.
- * \returns The desired Sdo, or NULL.
+/** Get an SDO from the dictionary, given its position in the list.
+ * \returns The desired SDO, or NULL.
  */
 
 const ec_sdo_t *ec_slave_get_sdo_by_pos_const(
         const ec_slave_t *slave, /**< EtherCAT slave. */
-        uint16_t sdo_position /**< Sdo list position. */
+        uint16_t sdo_position /**< SDO list position. */
         )
 {
     const ec_sdo_t *sdo;
@@ -622,8 +710,8 @@ const ec_sdo_t *ec_slave_get_sdo_by_pos_const(
 
 /*****************************************************************************/
 
-/** Get the number of Sdos in the dictionary.
- * \returns Sdo count.
+/** Get the number of SDOs in the dictionary.
+ * \returns SDO count.
  */
 
 uint16_t ec_slave_sdo_count(
@@ -642,12 +730,12 @@ uint16_t ec_slave_sdo_count(
 
 /*****************************************************************************/
 
-/** Finds a mapped Pdo.
- * \returns The desired Pdo object, or NULL.
+/** Finds a mapped PDO.
+ * \returns The desired PDO object, or NULL.
  */
 const ec_pdo_t *ec_slave_find_pdo(
         const ec_slave_t *slave, /**< Slave. */
-        uint16_t index /**< Pdo index to find. */
+        uint16_t index /**< PDO index to find. */
         )
 {
     unsigned int i;
@@ -668,7 +756,7 @@ const ec_pdo_t *ec_slave_find_pdo(
 
 /*****************************************************************************/
 
-/** Find name for a Pdo and its entries.
+/** Find name for a PDO and its entries.
  */
 void ec_slave_find_names_for_pdo(
         ec_slave_t *slave,
@@ -699,7 +787,7 @@ void ec_slave_find_names_for_pdo(
 
 /*****************************************************************************/
 
-/** Attach Pdo names.
+/** Attach PDO names.
  */
 void ec_slave_attach_pdo_names(
         ec_slave_t *slave
@@ -715,6 +803,178 @@ void ec_slave_attach_pdo_names(
             ec_slave_find_names_for_pdo(slave, pdo);
         }
     }
+}
+
+/*****************************************************************************/
+
+/** returns the previous connected port of a given port.
+ */
+
+unsigned int ec_slave_get_previous_port(
+    ec_slave_t *slave, /**< EtherCAT slave. */
+    unsigned int i /**< Port index */
+    )
+{
+    do
+    {
+        switch (i)
+        {
+        case 0: i = 2; break;
+        case 1: i = 3; break;
+        case 2: i = 1; break;
+        case 3:
+        default:i = 0; break;
+        }
+        if (slave->ports[i].next_slave)
+            return i;
+    } while (i);
+    return 0;
+}
+
+/*****************************************************************************/
+
+/** returns the next connected port of a given port.
+ */
+
+unsigned int ec_slave_get_next_port(
+    ec_slave_t *slave, /**< EtherCAT slave. */
+    unsigned int i /**< Port index */
+    )
+{
+    do
+    {
+        switch (i)
+        {
+        case 0: i = 3; break;
+        case 1: i = 2; break;
+        case 3: i = 1; break;
+        case 2:
+        default:i = 0; break;
+        }
+        if (slave->ports[i].next_slave)
+            return i;
+    } while (i);
+    return 0;
+}
+
+
+/*****************************************************************************/
+
+/** Calculates the sum of round-trip-times of connected ports 1-3.
+ */
+uint32_t ec_slave_calc_rtt_sum(
+        ec_slave_t *slave /**< EtherCAT slave. */
+        )
+{
+    uint32_t rtt_sum = 0, rtt;
+    unsigned int i = ec_slave_get_next_port(slave,0);
+    while (i != 0) {
+        rtt = slave->ports[i].receive_time - slave->ports[ec_slave_get_previous_port(slave,i)].receive_time;
+        rtt_sum += rtt;
+        i = ec_slave_get_next_port(slave,i);
+    }
+
+    return rtt_sum;
+}
+
+/*****************************************************************************/
+
+/** Finds the next slave supporting DC delay measurement.
+ */
+ec_slave_t *ec_slave_find_next_dc_slave(
+        ec_slave_t *slave /**< EtherCAT slave. */
+        )
+{
+    unsigned int i;
+    ec_slave_t *dc_slave = NULL;
+
+    if (slave->base_dc_supported) {
+        dc_slave = slave;
+    } else {
+        i = ec_slave_get_next_port(slave,0);
+        while (i != 0) {
+            ec_slave_t *next = slave->ports[i].next_slave;
+            if (next) {
+                dc_slave = ec_slave_find_next_dc_slave(next);
+                if (dc_slave)
+                    break;
+            }
+            i = ec_slave_get_next_port(slave,i);
+        }
+    }
+
+    return dc_slave;
+}
+
+/*****************************************************************************/
+
+/** Calculates the port transmission delays.
+ */
+void ec_slave_calc_port_delays(
+        ec_slave_t *slave /**< EtherCAT slave. */
+        )
+{
+    unsigned int i;
+    ec_slave_t *next_dc;
+    uint32_t rtt, next_rtt_sum;
+
+    if (!slave->base_dc_supported)
+        return;
+
+    i = ec_slave_get_next_port(slave,0);
+    while (i != 0) {
+        next_dc = ec_slave_find_next_dc_slave(slave->ports[i].next_slave);
+        if (next_dc) {
+            rtt = slave->ports[i].receive_time - slave->ports[ec_slave_get_previous_port(slave,i)].receive_time;
+            next_rtt_sum = ec_slave_calc_rtt_sum(next_dc);
+
+            slave->ports[i].delay_to_next_dc = (rtt - next_rtt_sum) / 2; // FIXME
+            next_dc->ports[0].delay_to_next_dc = (rtt - next_rtt_sum) / 2;
+
+#if 0
+            EC_SLAVE_DBG(slave, 1, "delay %u:%u rtt=%u"
+                    " next_rtt_sum=%u delay=%u\n",
+                    slave->ring_position, i, rtt, next_rtt_sum,
+                    slave->ports[i].delay_to_next_dc);
+#endif
+        }
+        i = ec_slave_get_next_port(slave,i);
+    }
+}
+
+/*****************************************************************************/
+
+/** Recursively calculates transmission delays.
+ */
+void ec_slave_calc_transmission_delays_rec(
+        ec_slave_t *slave, /**< Current slave. */
+        uint32_t *delay /**< Sum of delays. */
+        )
+{
+    unsigned int i;
+    ec_slave_t *next_dc;
+
+#if 1
+    EC_SLAVE_DBG(slave, 1, "%u\n", *delay);
+#endif
+
+    slave->transmission_delay = *delay;
+
+    i = ec_slave_get_next_port(slave,0);
+    while (i != 0) {
+        ec_slave_port_t *port = &slave->ports[i];
+        next_dc = ec_slave_find_next_dc_slave(port->next_slave);
+        if (next_dc) {
+            *delay = *delay + port->delay_to_next_dc;
+#if 0
+            EC_SLAVE_DBG(slave, 1, "%u:%u %u\n", slave->ring_position, i, *delay);
+#endif
+            ec_slave_calc_transmission_delays_rec(next_dc, delay);
+        }
+        i = ec_slave_get_next_port(slave,i);
+    }
+
+    *delay = *delay + slave->ports[0].delay_to_next_dc;
 }
 
 /*****************************************************************************/

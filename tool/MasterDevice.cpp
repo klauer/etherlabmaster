@@ -1,6 +1,29 @@
 /*****************************************************************************
  *
- * $Id$
+ *  $Id$
+ *
+ *  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+ *
+ *  This file is part of the IgH EtherCAT Master.
+ *
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
+ *
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  ****************************************************************************/
 
@@ -8,6 +31,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/ioctl.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <sstream>
 #include <iomanip>
@@ -17,10 +42,11 @@ using namespace std;
 
 /****************************************************************************/
 
-MasterDevice::MasterDevice()
+MasterDevice::MasterDevice(unsigned int index):
+    index(index),
+    masterCount(0U),
+    fd(-1)
 {
-    index = 0;
-    fd = -1;
 }
 
 /****************************************************************************/
@@ -44,15 +70,26 @@ void MasterDevice::open(Permissions perm)
     stringstream deviceName;
 
     if (fd == -1) { // not already open
-		deviceName << "/dev/EtherCAT" << index;
+        ec_ioctl_module_t module_data;
+        deviceName << "/dev/EtherCAT" << index;
 
-		if ((fd = ::open(deviceName.str().c_str(),
-						perm == ReadWrite ? O_RDWR : O_RDONLY)) == -1) {
-			stringstream err;
-			err << "Failed to open master device " << deviceName.str() << ": "
-				<< strerror(errno);
-			throw MasterDeviceException(err);
-		}
+        if ((fd = ::open(deviceName.str().c_str(),
+                        perm == ReadWrite ? O_RDWR : O_RDONLY)) == -1) {
+            stringstream err;
+            err << "Failed to open master device " << deviceName.str() << ": "
+                << strerror(errno);
+            throw MasterDeviceException(err);
+        }
+
+        getModule(&module_data);
+        if (module_data.ioctl_version_magic != EC_IOCTL_VERSION_MAGIC) {
+            stringstream err;
+            err << "ioctl() version magic is differing: "
+                << deviceName.str() << ": " << module_data.ioctl_version_magic
+                << ", ethercat tool: " << EC_IOCTL_VERSION_MAGIC;
+            throw MasterDeviceException(err);
+        }
+        masterCount = module_data.master_count;
     }
 }
 
@@ -61,9 +98,20 @@ void MasterDevice::open(Permissions perm)
 void MasterDevice::close()
 {
     if (fd != -1) {
-		::close(fd);
-		fd = -1;
-	}
+        ::close(fd);
+        fd = -1;
+    }
+}
+
+/****************************************************************************/
+
+void MasterDevice::getModule(ec_ioctl_module_t *data)
+{
+    if (ioctl(fd, EC_IOCTL_MODULE, data) < 0) {
+        stringstream err;
+        err << "Failed to get module information: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
 }
 
 /****************************************************************************/
@@ -105,7 +153,7 @@ void MasterDevice::getConfigPdo(
 
     if (ioctl(fd, EC_IOCTL_CONFIG_PDO, data) < 0) {
         stringstream err;
-        err << "Failed to get slave config Pdo: " << strerror(errno);
+        err << "Failed to get slave config PDO: " << strerror(errno);
         throw MasterDeviceException(err);
     }
 }
@@ -127,7 +175,7 @@ void MasterDevice::getConfigPdoEntry(
 
     if (ioctl(fd, EC_IOCTL_CONFIG_PDO_ENTRY, data) < 0) {
         stringstream err;
-        err << "Failed to get slave config Pdo entry: " << strerror(errno);
+        err << "Failed to get slave config PDO entry: " << strerror(errno);
         throw MasterDeviceException(err);
     }
 }
@@ -145,7 +193,25 @@ void MasterDevice::getConfigSdo(
 
     if (ioctl(fd, EC_IOCTL_CONFIG_SDO, data) < 0) {
         stringstream err;
-        err << "Failed to get slave config Sdo: " << strerror(errno);
+        err << "Failed to get slave config SDO: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
+}
+
+/****************************************************************************/
+
+void MasterDevice::getConfigIdn(
+        ec_ioctl_config_idn_t *data,
+        unsigned int index,
+        unsigned int pos
+        )
+{
+    data->config_index = index;
+    data->idn_pos = pos;
+
+    if (ioctl(fd, EC_IOCTL_CONFIG_IDN, data) < 0) {
+        stringstream err;
+        err << "Failed to get slave config IDN: " << strerror(errno);
         throw MasterDeviceException(err);
     }
 }
@@ -251,7 +317,7 @@ void MasterDevice::getPdo(
 
     if (ioctl(fd, EC_IOCTL_SLAVE_SYNC_PDO, pdo)) {
         stringstream err;
-        err << "Failed to get Pdo: " << strerror(errno);
+        err << "Failed to get PDO: " << strerror(errno);
         throw MasterDeviceException(err);
     }
 }
@@ -273,7 +339,7 @@ void MasterDevice::getPdoEntry(
 
     if (ioctl(fd, EC_IOCTL_SLAVE_SYNC_PDO_ENTRY, entry)) {
         stringstream err;
-        err << "Failed to get Pdo entry: " << strerror(errno);
+        err << "Failed to get PDO entry: " << strerror(errno);
         throw MasterDeviceException(err);
     }
 }
@@ -291,7 +357,7 @@ void MasterDevice::getSdo(
 
     if (ioctl(fd, EC_IOCTL_SLAVE_SDO, sdo)) {
         stringstream err;
-        err << "Failed to get Sdo: " << strerror(errno);
+        err << "Failed to get SDO: " << strerror(errno);
         throw MasterDeviceException(err);
     }
 }
@@ -311,7 +377,7 @@ void MasterDevice::getSdoEntry(
 
     if (ioctl(fd, EC_IOCTL_SLAVE_SDO_ENTRY, entry)) {
         stringstream err;
-        err << "Failed to get Sdo entry: " << strerror(errno);
+        err << "Failed to get SDO entry: " << strerror(errno);
         throw MasterDeviceException(err);
     }
 }
@@ -344,13 +410,76 @@ void MasterDevice::writeSii(
 
 /****************************************************************************/
 
+void MasterDevice::readReg(
+        ec_ioctl_slave_reg_t *data
+        )
+{
+    if (ioctl(fd, EC_IOCTL_SLAVE_REG_READ, data) < 0) {
+        stringstream err;
+        err << "Failed to read register: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
+}
+
+/****************************************************************************/
+
+void MasterDevice::writeReg(
+        ec_ioctl_slave_reg_t *data
+        )
+{
+    if (ioctl(fd, EC_IOCTL_SLAVE_REG_WRITE, data) < 0) {
+        stringstream err;
+        err << "Failed to write register: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
+}
+
+/****************************************************************************/
+
+void MasterDevice::readFoe(
+        ec_ioctl_slave_foe_t *data
+        )
+{
+    if (ioctl(fd, EC_IOCTL_SLAVE_FOE_READ, data) < 0) {
+        stringstream err;
+        err << "Failed to read via FoE: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
+}
+
+/****************************************************************************/
+
+void MasterDevice::writeFoe(
+        ec_ioctl_slave_foe_t *data
+        )
+{
+    if (ioctl(fd, EC_IOCTL_SLAVE_FOE_WRITE, data) < 0) {
+        stringstream err;
+        err << "Failed to write via FoE: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
+}
+
+/****************************************************************************/
+
 void MasterDevice::setDebug(unsigned int debugLevel)
 {
     if (ioctl(fd, EC_IOCTL_MASTER_DEBUG, debugLevel) < 0) {
         stringstream err;
         err << "Failed to set debug level: " << strerror(errno);
         throw MasterDeviceException(err);
-	}
+    }
+}
+
+/****************************************************************************/
+
+void MasterDevice::rescan()
+{
+    if (ioctl(fd, EC_IOCTL_MASTER_RESCAN, 0) < 0) {
+        stringstream err;
+        err << "Failed to command rescan: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
 }
 
 /****************************************************************************/
@@ -362,10 +491,10 @@ void MasterDevice::sdoDownload(ec_ioctl_slave_sdo_download_t *data)
         if (errno == EIO && data->abort_code) {
             throw MasterDeviceSdoAbortException(data->abort_code);
         } else {
-            err << "Failed to download Sdo: " << strerror(errno);
+            err << "Failed to download SDO: " << strerror(errno);
             throw MasterDeviceException(err);
         }
-	}
+    }
 }
 
 /****************************************************************************/
@@ -377,7 +506,7 @@ void MasterDevice::sdoUpload(ec_ioctl_slave_sdo_upload_t *data)
         if (errno == EIO && data->abort_code) {
             throw MasterDeviceSdoAbortException(data->abort_code);
         } else {
-            err << "Failed to upload Sdo: " << strerror(errno);
+            err << "Failed to upload SDO: " << strerror(errno);
             throw MasterDeviceException(err);
         }
     }
@@ -403,6 +532,56 @@ void MasterDevice::requestState(
         else
             err << strerror(errno);
         throw MasterDeviceException(err);
+    }
+}
+
+/****************************************************************************/
+
+#ifdef EC_EOE
+
+void MasterDevice::getEoeHandler(
+        ec_ioctl_eoe_handler_t *eoe,
+        uint16_t eoeHandlerIndex
+        )
+{
+    eoe->eoe_index = eoeHandlerIndex;
+
+    if (ioctl(fd, EC_IOCTL_EOE_HANDLER, eoe)) {
+        stringstream err;
+        err << "Failed to get EoE handler: " << strerror(errno);
+        throw MasterDeviceException(err);
+    }
+}
+
+#endif
+
+/****************************************************************************/
+
+void MasterDevice::readSoe(ec_ioctl_slave_soe_read_t *data)
+{
+    if (ioctl(fd, EC_IOCTL_SLAVE_SOE_READ, data) < 0) {
+        if (errno == EIO && data->error_code) {
+            throw MasterDeviceSoeException(data->error_code);
+        } else {
+            stringstream err;
+            err << "Failed to read IDN: " << strerror(errno);
+            throw MasterDeviceException(err);
+        }
+    }
+}
+
+/****************************************************************************/
+
+void MasterDevice::writeSoe(ec_ioctl_slave_soe_write_t *data)
+{
+    if (ioctl(fd, EC_IOCTL_SLAVE_SOE_WRITE, data) < 0) {
+        if (errno == EIO && data->error_code) {
+            throw MasterDeviceSoeException(data->error_code);
+        } else {
+            stringstream err;
+            err << "Failed to write IDN: " << strerror(errno);
+            throw MasterDeviceException(err);
+        }
     }
 }
 

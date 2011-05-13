@@ -2,51 +2,48 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
 /** \file
- * Canopen-over-EtherCAT Sdo request functions.
+ * Canopen over EtherCAT SDO request functions.
  */
 
 /*****************************************************************************/
 
 #include <linux/module.h>
 #include <linux/jiffies.h>
+#include <linux/slab.h>
 
 #include "sdo_request.h"
 
 /*****************************************************************************/
 
-/** Default timeout in ms to wait for Sdo transfer responses.
+/** Default timeout in ms to wait for SDO transfer responses.
  */
-#define EC_SDO_REQUEST_RESPONSE_TIMEOUT 3000
+#define EC_SDO_REQUEST_RESPONSE_TIMEOUT 1000
 
 /*****************************************************************************/
 
@@ -54,40 +51,30 @@ void ec_sdo_request_clear_data(ec_sdo_request_t *);
 
 /*****************************************************************************/
 
-/** State type translation table.
- */
-static const ec_sdo_request_state_t state_translation_table[] = {
-    EC_SDO_REQUEST_UNUSED,  // EC_REQUEST_INIT,
-    EC_SDO_REQUEST_BUSY,    // EC_REQUEST_QUEUED,
-    EC_SDO_REQUEST_BUSY,    // EC_REQUEST_BUSY,
-    EC_SDO_REQUEST_SUCCESS, // EC_REQUEST_SUCCESS,
-    EC_SDO_REQUEST_ERROR    // EC_REQUEST_FAILURE
-};
-
-/*****************************************************************************/
-
-/** Sdo request constructor.
+/** SDO request constructor.
  */
 void ec_sdo_request_init(
-        ec_sdo_request_t *req /**< Sdo request. */
+        ec_sdo_request_t *req /**< SDO request. */
         )
 {
+    req->complete_access = 0;
     req->data = NULL;
     req->mem_size = 0;
     req->data_size = 0;
     req->dir = EC_DIR_INVALID;
     req->issue_timeout = 0; // no timeout
     req->response_timeout = EC_SDO_REQUEST_RESPONSE_TIMEOUT;
-    req->state = EC_REQUEST_INIT;
+    req->state = EC_INT_REQUEST_INIT;
+    req->errno = 0;
     req->abort_code = 0x00000000;
 }
 
 /*****************************************************************************/
 
-/** Sdo request destructor.
+/** SDO request destructor.
  */
 void ec_sdo_request_clear(
-        ec_sdo_request_t *req /**< Sdo request. */
+        ec_sdo_request_t *req /**< SDO request. */
         )
 {
     ec_sdo_request_clear_data(req);
@@ -95,10 +82,27 @@ void ec_sdo_request_clear(
 
 /*****************************************************************************/
 
-/** Sdo request destructor.
+/** Copy another SDO request.
+ *
+ * \attention Only the index subindex and data are copied.
+ */
+int ec_sdo_request_copy(
+        ec_sdo_request_t *req, /**< SDO request. */
+        const ec_sdo_request_t *other /**< Other SDO request to copy from. */
+        )
+{
+    req->complete_access = other->complete_access;
+    req->index = other->index;
+    req->subindex = other->subindex;
+    return ec_sdo_request_copy_data(req, other->data, other->data_size);
+}
+
+/*****************************************************************************/
+
+/** SDO request destructor.
  */
 void ec_sdo_request_clear_data(
-        ec_sdo_request_t *req /**< Sdo request. */
+        ec_sdo_request_t *req /**< SDO request. */
         )
 {
     if (req->data) {
@@ -112,12 +116,12 @@ void ec_sdo_request_clear_data(
 
 /*****************************************************************************/
 
-/** Set the Sdo address.
+/** Set the SDO address.
  */
 void ec_sdo_request_address(
-        ec_sdo_request_t *req, /**< Sdo request. */
-        uint16_t index, /**< Sdo index. */
-        uint8_t subindex /**< Sdo subindex. */
+        ec_sdo_request_t *req, /**< SDO request. */
+        uint16_t index, /**< SDO index. */
+        uint8_t subindex /**< SDO subindex. */
         )
 {
     req->index = index;
@@ -129,9 +133,11 @@ void ec_sdo_request_address(
 /** Pre-allocates the data memory.
  *
  * If the \a mem_size is already bigger than \a size, nothing is done.
+ *
+ * \return 0 on success, otherwise -ENOMEM.
  */
 int ec_sdo_request_alloc(
-        ec_sdo_request_t *req, /**< Sdo request. */
+        ec_sdo_request_t *req, /**< SDO request. */
         size_t size /**< Data size to allocate. */
         )
 {
@@ -141,8 +147,8 @@ int ec_sdo_request_alloc(
     ec_sdo_request_clear_data(req);
 
     if (!(req->data = (uint8_t *) kmalloc(size, GFP_KERNEL))) {
-        EC_ERR("Failed to allocate %u bytes of Sdo memory.\n", size);
-        return -1;
+        EC_ERR("Failed to allocate %zu bytes of SDO memory.\n", size);
+        return -ENOMEM;
     }
 
     req->mem_size = size;
@@ -152,18 +158,22 @@ int ec_sdo_request_alloc(
 
 /*****************************************************************************/
 
-/** Copies Sdo data from an external source.
+/** Copies SDO data from an external source.
  *
  * If the \a mem_size is to small, new memory is allocated.
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ec_sdo_request_copy_data(
-        ec_sdo_request_t *req, /**< Sdo request. */
+        ec_sdo_request_t *req, /**< SDO request. */
         const uint8_t *source, /**< Source data. */
         size_t size /**< Number of bytes in \a source. */
         )
 {
-    if (ec_sdo_request_alloc(req, size))
-        return -1;
+    int ret = ec_sdo_request_alloc(req, size);
+    if (ret < 0)
+        return ret;
 
     memcpy(req->data, source, size);
     req->data_size = size;
@@ -176,14 +186,14 @@ int ec_sdo_request_copy_data(
  *
  * \return non-zero if the timeout was exceeded, else zero.
  */
-int ec_sdo_request_timed_out(const ec_sdo_request_t *req /**< Sdo request. */)
+int ec_sdo_request_timed_out(const ec_sdo_request_t *req /**< SDO request. */)
 {
     return req->issue_timeout
         && jiffies - req->jiffies_start > HZ * req->issue_timeout / 1000;
 }
 
 /*****************************************************************************
- * Realtime interface.
+ * Application interface.
  ****************************************************************************/
 
 void ecrt_sdo_request_timeout(ec_sdo_request_t *req, uint32_t timeout)
@@ -207,9 +217,9 @@ size_t ecrt_sdo_request_data_size(const ec_sdo_request_t *req)
 
 /*****************************************************************************/
 
-ec_sdo_request_state_t ecrt_sdo_request_state(const ec_sdo_request_t *req)
+ec_request_state_t ecrt_sdo_request_state(const ec_sdo_request_t *req)
 {
-   return state_translation_table[req->state];
+   return ec_request_state_translation_table[req->state];
 }
 
 /*****************************************************************************/
@@ -217,7 +227,8 @@ ec_sdo_request_state_t ecrt_sdo_request_state(const ec_sdo_request_t *req)
 void ecrt_sdo_request_read(ec_sdo_request_t *req)
 {
     req->dir = EC_DIR_INPUT;
-    req->state = EC_REQUEST_QUEUED;
+    req->state = EC_INT_REQUEST_QUEUED;
+    req->errno = 0;
     req->abort_code = 0x00000000;
     req->jiffies_start = jiffies;
 }
@@ -227,7 +238,8 @@ void ecrt_sdo_request_read(ec_sdo_request_t *req)
 void ecrt_sdo_request_write(ec_sdo_request_t *req)
 {
     req->dir = EC_DIR_OUTPUT;
-    req->state = EC_REQUEST_QUEUED;
+    req->state = EC_INT_REQUEST_QUEUED;
+    req->errno = 0;
     req->abort_code = 0x00000000;
     req->jiffies_start = jiffies;
 }

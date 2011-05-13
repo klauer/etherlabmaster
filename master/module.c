@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -39,6 +35,7 @@
 
 #include <linux/module.h>
 #include <linux/device.h>
+#include <linux/err.h>
 
 #include "globals.h"
 #include "master.h"
@@ -46,7 +43,7 @@
 
 /*****************************************************************************/
 
-#define MAX_MASTERS 5 /**< Maximum number of masters. */
+#define MAX_MASTERS 32 /**< Maximum number of masters. */
 
 /*****************************************************************************/
 
@@ -58,12 +55,13 @@ static int ec_mac_parse(uint8_t *, const char *, int);
 /*****************************************************************************/
 
 static char *main_devices[MAX_MASTERS]; /**< Main devices parameter. */
+static unsigned int master_count; /**< Number of masters. */
 static char *backup_devices[MAX_MASTERS]; /**< Backup devices parameter. */
+static unsigned int backup_count; /**< Number of backup devices. */
+static unsigned int debug_level;  /**< Debug level parameter. */
 
 static ec_master_t *masters; /**< Array of masters. */
-static struct semaphore master_sem; /**< Master semaphore. */
-static unsigned int master_count; /**< Number of masters. */
-static unsigned int backup_count; /**< Number of backup devices. */
+static struct ec_mutex_t master_mutex; /**< Master mutex. */
 
 dev_t device_number; /**< Device number for master cdevs. */
 struct class *class; /**< Device class. */
@@ -85,6 +83,8 @@ module_param_array(main_devices, charp, &master_count, S_IRUGO);
 MODULE_PARM_DESC(main_devices, "MAC addresses of main devices");
 module_param_array(backup_devices, charp, &backup_count, S_IRUGO);
 MODULE_PARM_DESC(backup_devices, "MAC addresses of backup devices");
+module_param_named(debug_level, debug_level, uint, S_IRUGO);
+MODULE_PARM_DESC(debug_level, "Debug level");
 
 /** \endcond */
 
@@ -101,10 +101,11 @@ int __init ec_init_module(void)
 
     EC_INFO("Master driver %s\n", EC_MASTER_VERSION);
 
-    init_MUTEX(&master_sem);
+    ec_mutex_init(&master_mutex);
 
     if (master_count) {
-        if (alloc_chrdev_region(&device_number, 0, master_count, "EtherCAT")) {
+        if (alloc_chrdev_region(&device_number,
+                    0, master_count, "EtherCAT")) {
             EC_ERR("Failed to obtain device number(s)!\n");
             ret = -EBUSY;
             goto out_return;
@@ -114,6 +115,7 @@ int __init ec_init_module(void)
     class = class_create(THIS_MODULE, "EtherCAT");
     if (IS_ERR(class)) {
         EC_ERR("Failed to create device class.\n");
+        ret = PTR_ERR(class);
         goto out_cdev;
     }
 
@@ -122,32 +124,35 @@ int __init ec_init_module(void)
 
     // process MAC parameters
     for (i = 0; i < master_count; i++) {
-        if (ec_mac_parse(macs[i][0], main_devices[i], 0)) {
-            ret = -EINVAL;
+        ret = ec_mac_parse(macs[i][0], main_devices[i], 0);
+        if (ret)
             goto out_class;
-        }
         
-        if (i < backup_count && ec_mac_parse(macs[i][1], backup_devices[i], 1)) {
-            ret = -EINVAL;
-            goto out_class;
+        if (i < backup_count) {
+            ret = ec_mac_parse(macs[i][1], backup_devices[i], 1);
+            if (ret)
+                goto out_class;
         }
     }
+
+    // initialize static master variables
+    ec_master_init_static();
     
     if (master_count) {
         if (!(masters = kmalloc(sizeof(ec_master_t) * master_count,
                         GFP_KERNEL))) {
-            EC_ERR("Failed to allocate memory for EtherCAT masters.\n");
+            EC_ERR("Failed to allocate memory"
+                    " for EtherCAT masters.\n");
             ret = -ENOMEM;
             goto out_class;
         }
     }
     
     for (i = 0; i < master_count; i++) {
-        if (ec_master_init(&masters[i], i, macs[i][0], macs[i][1],
-                    device_number, class)) {
-            ret = -ENOMEM;
+        ret = ec_master_init(&masters[i], i, macs[i][0], macs[i][1],
+                    device_number, class, debug_level);
+        if (ret)
             goto out_free_masters;
-        }
     }
     
     EC_INFO("%u master%s waiting for devices.\n",
@@ -190,6 +195,15 @@ void __exit ec_cleanup_module(void)
         unregister_chrdev_region(device_number, master_count);
     
     EC_INFO("Master module cleaned up.\n");
+}
+
+/*****************************************************************************/
+
+/** Get the number of masters.
+ */
+unsigned int ec_master_count(void)
+{
+    return master_count;
 }
 
 /*****************************************************************************
@@ -315,6 +329,8 @@ static int ec_mac_parse(uint8_t *mac, const char *src, int allow_empty)
 /*****************************************************************************/
 
 /** Outputs frame contents for debugging purposes.
+ * If the data block is larger than 256 bytes, only the first 128
+ * and the last 128 bytes will be shown
  */
 void ec_print_data(const uint8_t *data, /**< pointer to data */
                    size_t size /**< number of bytes to output */
@@ -325,8 +341,15 @@ void ec_print_data(const uint8_t *data, /**< pointer to data */
     EC_DBG("");
     for (i = 0; i < size; i++) {
         printk("%02X ", data[i]);
-        if ((i + 1) % 16 == 0) {
+
+        if ((i + 1) % 16 == 0 && i < size - 1) {
             printk("\n");
+            EC_DBG("");
+        }
+
+        if (i + 1 == 128 && size > 256) {
+            printk("dropped %zu bytes\n", size - 128 - i);
+            i = size - 128;
             EC_DBG("");
         }
     }
@@ -361,8 +384,9 @@ void ec_print_data_diff(const uint8_t *d1, /**< first data */
 /** Prints slave states in clear text.
  */
 size_t ec_state_string(uint8_t states, /**< slave states */
-                       char *buffer /**< target buffer
+                       char *buffer, /**< target buffer
                                        (min. EC_STATE_STRING_SIZE bytes) */
+                       uint8_t multi /**< Show multi-state mask. */
                        )
 {
     off_t off = 0;
@@ -373,24 +397,42 @@ size_t ec_state_string(uint8_t states, /**< slave states */
         return off;
     }
 
-    if (states & EC_SLAVE_STATE_INIT) {
-        off += sprintf(buffer + off, "INIT");
+    if (multi) { // multiple slaves
+        if (states & EC_SLAVE_STATE_INIT) {
+            off += sprintf(buffer + off, "INIT");
+            first = 0;
+        }
+        if (states & EC_SLAVE_STATE_PREOP) {
+            if (!first) off += sprintf(buffer + off, ", ");
+            off += sprintf(buffer + off, "PREOP");
+            first = 0;
+        }
+        if (states & EC_SLAVE_STATE_SAFEOP) {
+            if (!first) off += sprintf(buffer + off, ", ");
+            off += sprintf(buffer + off, "SAFEOP");
+            first = 0;
+        }
+        if (states & EC_SLAVE_STATE_OP) {
+            if (!first) off += sprintf(buffer + off, ", ");
+            off += sprintf(buffer + off, "OP");
+        }
+    } else { // single slave
+        if ((states & EC_SLAVE_STATE_MASK) == EC_SLAVE_STATE_INIT) {
+            off += sprintf(buffer + off, "INIT");
+        } else if ((states & EC_SLAVE_STATE_MASK) == EC_SLAVE_STATE_PREOP) {
+            off += sprintf(buffer + off, "PREOP");
+        } else if ((states & EC_SLAVE_STATE_MASK) == EC_SLAVE_STATE_BOOT) {
+            off += sprintf(buffer + off, "BOOT");
+        } else if ((states & EC_SLAVE_STATE_MASK) == EC_SLAVE_STATE_SAFEOP) {
+            off += sprintf(buffer + off, "SAFEOP");
+        } else if ((states & EC_SLAVE_STATE_MASK) == EC_SLAVE_STATE_OP) {
+            off += sprintf(buffer + off, "OP");
+        } else {
+            off += sprintf(buffer + off, "(invalid)");
+        }
         first = 0;
     }
-    if (states & EC_SLAVE_STATE_PREOP) {
-        if (!first) off += sprintf(buffer + off, ", ");
-        off += sprintf(buffer + off, "PREOP");
-        first = 0;
-    }
-    if (states & EC_SLAVE_STATE_SAFEOP) {
-        if (!first) off += sprintf(buffer + off, ", ");
-        off += sprintf(buffer + off, "SAFEOP");
-        first = 0;
-    }
-    if (states & EC_SLAVE_STATE_OP) {
-        if (!first) off += sprintf(buffer + off, ", ");
-        off += sprintf(buffer + off, "OP");
-    }
+
     if (states & EC_SLAVE_STATE_ACK_ERR) {
         if (!first) off += sprintf(buffer + off, " + ");
         off += sprintf(buffer + off, "ERROR");
@@ -426,9 +468,9 @@ ec_device_t *ecdev_offer(
     for (i = 0; i < master_count; i++) {
         master = &masters[i];
 
-        down(&master->device_sem);
+        ec_mutex_lock(&master->device_mutex);
         if (master->main_device.dev) { // master already has a device
-            up(&master->device_sem);
+            ec_mutex_unlock(&master->device_mutex);
             continue;
         }
             
@@ -439,17 +481,19 @@ ec_device_t *ecdev_offer(
                     str, master->index);
 
             ec_device_attach(&master->main_device, net_dev, poll, module);
-            up(&master->device_sem);
+            ec_mutex_unlock(&master->device_mutex);
             
-            sprintf(net_dev->name, "ec%u", master->index);
+            snprintf(net_dev->name, IFNAMSIZ, "ec%u", master->index);
+
             return &master->main_device; // offer accepted
         }
         else {
-            up(&master->device_sem);
+            ec_mutex_unlock(&master->device_mutex);
 
             if (master->debug_level) {
                 ec_mac_print(net_dev->dev_addr, str);
-                EC_DBG("Master %u declined device %s.\n", master->index, str);
+                EC_MASTER_DBG(master, 0, "Master declined device %s.\n",
+                        str);
             }
         }
     }
@@ -461,48 +505,63 @@ ec_device_t *ecdev_offer(
  *  Realtime interface
  *****************************************************************************/
 
-ec_master_t *ecrt_request_master(unsigned int master_index)
+/** Request a master.
+ *
+ * Same as ecrt_request_master(), but with ERR_PTR() return value.
+ */
+ec_master_t *ecrt_request_master_err(
+        unsigned int master_index /**< Master index. */
+        )
 {
-    ec_master_t *master;
+    ec_master_t *master, *errptr = NULL;
 
     EC_INFO("Requesting master %u...\n", master_index);
 
     if (master_index >= master_count) {
         EC_ERR("Invalid master index %u.\n", master_index);
+        errptr = ERR_PTR(-EINVAL);
         goto out_return;
     }
     master = &masters[master_index];
 
-    if (down_interruptible(&master_sem))
+    if (ec_mutex_lock_interruptible(&master_mutex)) {
+        errptr = ERR_PTR(-EINTR);
         goto out_return;
+    }
 
     if (master->reserved) {
-        up(&master_sem);
-        EC_ERR("Master %u is already in use!\n", master_index);
+        ec_mutex_unlock(&master_mutex);
+        EC_MASTER_ERR(master, "Master already in use!\n");
+        errptr = ERR_PTR(-EBUSY);
         goto out_return;
     }
     master->reserved = 1;
-    up(&master_sem);
+    ec_mutex_unlock(&master_mutex);
 
-    if (down_interruptible(&master->device_sem))
+    if (ec_mutex_lock_interruptible(&master->device_mutex)) {
+        errptr = ERR_PTR(-EINTR);
         goto out_release;
+    }
     
     if (master->phase != EC_IDLE) {
-        up(&master->device_sem);
-        EC_ERR("Master %u still waiting for devices!\n", master_index);
+        ec_mutex_unlock(&master->device_mutex);
+        EC_MASTER_ERR(master, "Master still waiting for devices!\n");
+        errptr = ERR_PTR(-ENODEV);
         goto out_release;
     }
 
     if (!try_module_get(master->main_device.module)) {
-        up(&master->device_sem);
+        ec_mutex_unlock(&master->device_mutex);
         EC_ERR("Device module is unloading!\n");
+        errptr = ERR_PTR(-ENODEV);
         goto out_release;
     }
 
-    up(&master->device_sem);
+    ec_mutex_unlock(&master->device_mutex);
 
     if (ec_master_enter_operation_phase(master)) {
-        EC_ERR("Failed to enter OPERATION phase!\n");
+        EC_MASTER_ERR(master, "Failed to enter OPERATION phase!\n");
+        errptr = ERR_PTR(-EIO);
         goto out_module_put;
     }
 
@@ -514,17 +573,26 @@ ec_master_t *ecrt_request_master(unsigned int master_index)
  out_release:
     master->reserved = 0;
  out_return:
-    return NULL;
+    return errptr;
+}
+
+/*****************************************************************************/
+
+ec_master_t *ecrt_request_master(unsigned int master_index)
+{
+    ec_master_t *master = ecrt_request_master_err(master_index);
+    return IS_ERR(master) ? NULL : master;
 }
 
 /*****************************************************************************/
 
 void ecrt_release_master(ec_master_t *master)
 {
-    EC_INFO("Releasing master %u...\n", master->index);
+    EC_MASTER_INFO(master, "Releasing master...\n");
 
     if (!master->reserved) {
-        EC_WARN("Master %u was was not requested!\n", master->index);
+        EC_MASTER_WARN(master, "%s(): Master was was not requested!\n",
+                __func__);
         return;
     }
 
@@ -533,7 +601,7 @@ void ecrt_release_master(ec_master_t *master)
     module_put(master->main_device.module);
     master->reserved = 0;
 
-    EC_INFO("Released master %u.\n", master->index);
+    EC_MASTER_INFO(master, "Released.\n");
 }
 
 /*****************************************************************************/
@@ -542,6 +610,51 @@ unsigned int ecrt_version_magic(void)
 {
     return ECRT_VERSION_MAGIC;
 }
+
+
+
+/** Return pointer to running master
+/*****************************************************************************/
+ec_master_t *ecrt_attach_master(unsigned int master_index)
+{
+    ec_master_t *master = NULL;
+
+    EC_INFO("Requesting master %u...\n", master_index);
+
+    if (master_index >= master_count) {
+        EC_ERR("Invalid master index %u.\n", master_index);
+        return master;
+    }
+
+    master = &masters[master_index];
+    if (master->reserved) 
+      {
+       // ok master is attached
+        EC_INFO("attaching Master %u!\n", master_index);
+      }
+    else
+      {
+        EC_ERR("No Master %u in use!\n", master_index);
+        master = NULL;
+    }
+    return master;
+}
+
+
+
+/*****************************************************************************/
+
+/** Global request state type translation table.
+ *
+ * Translates an internal request state to an external one.
+ */
+const ec_request_state_t ec_request_state_translation_table[] = {
+    EC_REQUEST_UNUSED,  // EC_INT_REQUEST_INIT,
+    EC_REQUEST_BUSY,    // EC_INT_REQUEST_QUEUED,
+    EC_REQUEST_BUSY,    // EC_INT_REQUEST_BUSY,
+    EC_REQUEST_SUCCESS, // EC_INT_REQUEST_SUCCESS,
+    EC_REQUEST_ERROR    // EC_INT_REQUEST_FAILURE
+};
 
 /*****************************************************************************/
 
@@ -555,6 +668,7 @@ EXPORT_SYMBOL(ecdev_offer);
 EXPORT_SYMBOL(ecrt_request_master);
 EXPORT_SYMBOL(ecrt_release_master);
 EXPORT_SYMBOL(ecrt_version_magic);
+EXPORT_SYMBOL(ecrt_attach_master);
 
 /** \endcond */
 

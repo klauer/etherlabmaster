@@ -2,38 +2,34 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
 /**
    \file
-   EtherCAT CANopen Sdo request structure.
+   EtherCAT CANopen SDO request structure.
 */
 
 /*****************************************************************************/
@@ -43,21 +39,20 @@
 
 #include <linux/list.h>
 
-#include "../include/ecrt.h"
-
 #include "globals.h"
 
 /*****************************************************************************/
 
-/** CANopen Sdo request.
+/** CANopen SDO request.
  */
 struct ec_sdo_request {
     struct list_head list; /**< List item. */
-    uint16_t index; /**< Sdo index. */
-    uint8_t subindex; /**< Sdo subindex. */
-    uint8_t *data; /**< Pointer to Sdo data. */
-    size_t mem_size; /**< Size of Sdo data memory. */
-    size_t data_size; /**< Size of Sdo data. */
+    uint16_t index; /**< SDO index. */
+    uint8_t subindex; /**< SDO subindex. */
+    uint8_t *data; /**< Pointer to SDO data. */
+    size_t mem_size; /**< Size of SDO data memory. */
+    size_t data_size; /**< Size of SDO data. */
+    uint8_t complete_access; /**< SDO shall be transferred completely. */
     uint32_t issue_timeout; /**< Maximum time in ms, the processing of the
                               request may take. */
     uint32_t response_timeout; /**< Maximum time in ms, the transfer is
@@ -65,11 +60,12 @@ struct ec_sdo_request {
     ec_direction_t dir; /**< Direction. EC_DIR_OUTPUT means downloading to
                           the slave, EC_DIR_INPUT means uploading from the
                           slave. */
-    ec_request_state_t state; /**< Sdo request state. */
+    ec_internal_request_state_t state; /**< SDO request state. */
     unsigned long jiffies_start; /**< Jiffies, when the request was issued. */
     unsigned long jiffies_sent; /**< Jiffies, when the upload/download
                                      request was sent. */
-    uint32_t abort_code; /**< Sdo request abort code. Zero on success. */
+    int errno; /**< Error number. */
+    uint32_t abort_code; /**< SDO request abort code. Zero on success. */
 };
 
 /*****************************************************************************/
@@ -77,6 +73,7 @@ struct ec_sdo_request {
 void ec_sdo_request_init(ec_sdo_request_t *);
 void ec_sdo_request_clear(ec_sdo_request_t *);
 
+int ec_sdo_request_copy(ec_sdo_request_t *, const ec_sdo_request_t *);
 void ec_sdo_request_address(ec_sdo_request_t *, uint16_t, uint8_t);
 int ec_sdo_request_alloc(ec_sdo_request_t *, size_t);
 int ec_sdo_request_copy_data(ec_sdo_request_t *, const uint8_t *, size_t);

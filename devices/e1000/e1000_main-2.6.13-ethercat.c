@@ -24,6 +24,8 @@
   Linux NICS <linux.nics@intel.com>
   Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
 
+  vim: noexpandtab
+
 *******************************************************************************/
 
 #include "e1000-2.6.13-ethercat.h"
@@ -2680,7 +2682,7 @@ e1000_intr(int irq, void *data, struct pt_regs *regs)
 #ifdef CONFIG_E1000_NAPI
 	if (adapter->ecdev) {
 		for(i = 0; i < E1000_MAX_INTR; i++)
-			if(unlikely(!adapter->clean_rx(adapter, &work_done, 100) &
+			if(unlikely(!adapter->clean_rx(adapter, &work_done, 100) &&
 						!e1000_clean_tx_irq(adapter)))
 				break;
 	} else {

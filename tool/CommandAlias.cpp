@@ -1,6 +1,29 @@
 /*****************************************************************************
  *
- * $Id$
+ *  $Id$
+ *
+ *  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+ *
+ *  This file is part of the IgH EtherCAT Master.
+ *
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
+ *
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  ****************************************************************************/
 
@@ -11,7 +34,7 @@ using namespace std;
 
 #include "CommandAlias.h"
 #include "sii_crc.h"
-#include "byteorder.h"
+#include "MasterDevice.h"
 
 /*****************************************************************************/
 
@@ -22,11 +45,11 @@ CommandAlias::CommandAlias():
 
 /*****************************************************************************/
 
-string CommandAlias::helpString() const
+string CommandAlias::helpString(const string &binaryBaseName) const
 {
     stringstream str;
 
-    str << getName() << " [OPTIONS] <ALIAS>" << endl
+    str << binaryBaseName << " " << getName() << " [OPTIONS] <ALIAS>" << endl
         << endl
         << getBriefDescription() << endl
         << endl
@@ -53,7 +76,7 @@ string CommandAlias::helpString() const
 
 /** Writes the Secondary slave address (alias) to the slave's SII.
  */
-void CommandAlias::execute(MasterDevice &m, const StringVector &args)
+void CommandAlias::execute(const StringVector &args)
 {
     uint16_t alias;
     stringstream err, strAlias;
@@ -76,6 +99,7 @@ void CommandAlias::execute(MasterDevice &m, const StringVector &args)
     }
     alias = number;
 
+    MasterDevice m(getSingleMasterIndex());
     m.open(MasterDevice::ReadWrite);
     slaves = selectedSlaves(m);
     
@@ -130,7 +154,7 @@ void CommandAlias::writeSlaveAlias(
     }
 
     // write new alias address in word 4
-    data.words[4] = cputole16(alias);
+    data.words[4] = cpu_to_le16(alias);
 
     // calculate checksum over words 0 to 6
     crc = calcSiiCrc((const uint8_t *) data.words, 14);

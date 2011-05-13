@@ -1,11 +1,35 @@
 /*****************************************************************************
  *
- * $Id$
+ *  $Id$
+ *
+ *  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+ *
+ *  This file is part of the IgH EtherCAT Master.
+ *
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
+ *
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  ****************************************************************************/
 
 #include <getopt.h>
 #include <libgen.h> // basename()
+#include <stdlib.h>
 
 #include <iostream>
 #include <iomanip>
@@ -13,41 +37,54 @@ using namespace std;
 
 #include "CommandAlias.h"
 #include "CommandConfig.h"
+#include "CommandCStruct.h"
 #include "CommandData.h"
 #include "CommandDebug.h"
 #include "CommandDomains.h"
 #include "CommandDownload.h"
+#ifdef EC_EOE
+# include "CommandEoe.h"
+#endif
+#include "CommandFoeRead.h"
+#include "CommandFoeWrite.h"
+#include "CommandGraph.h"
 #include "CommandMaster.h"
 #include "CommandPdos.h"
+#include "CommandRegRead.h"
+#include "CommandRegWrite.h"
+#include "CommandRescan.h"
 #include "CommandSdos.h"
 #include "CommandSiiRead.h"
 #include "CommandSiiWrite.h"
 #include "CommandSlaves.h"
+#include "CommandSoeRead.h"
+#include "CommandSoeWrite.h"
 #include "CommandStates.h"
 #include "CommandUpload.h"
 #include "CommandVersion.h"
 #include "CommandXml.h"
+
+#include "MasterDevice.h"
 
 /*****************************************************************************/
 
 typedef list<Command *> CommandList;
 CommandList commandList;
 
-MasterDevice masterDev;
-
 string binaryBaseName;
 string commandName;
 Command::StringVector commandArgs;
 
 // option variables
-unsigned int masterIndex = 0;
-int slavePosition = -1;
-int slaveAlias = -1;
-int domainIndex = -1;
+string masters = "-"; // all masters
+string positions = "-"; // all positions
+string aliases = "-"; // all aliases
+string domains = "-"; // all domains
 string dataTypeStr;
 Command::Verbosity verbosity = Command::Normal;
 bool force = false;
 bool helpRequested = false;
+string outputFile;
 
 /*****************************************************************************/
 
@@ -65,7 +102,7 @@ string usage()
 
     str << "Usage: " << binaryBaseName << " <COMMAND> [OPTIONS] [ARGUMENTS]"
         << endl << endl
-		<< "Commands (can be abbreviated):" << endl;
+        << "Commands (can be abbreviated):" << endl;
 
     str << left;
     for (ci = commandList.begin(); ci != commandList.end(); ci++) {
@@ -74,9 +111,12 @@ string usage()
     }
 
     str << endl
-		<< "Global options:" << endl
-        << "  --master  -m <master>  Index of the master to use. Default: 0."
-		<< endl
+        << "Global options:" << endl
+        << "  --master  -m <master>  Comma separated list of masters" << endl
+        << "                         to select, ranges are allowed." << endl
+        << "                         Examples: '1,3', '5-7,9', '-3'." << endl
+        << "                         Default: '-' (all)."
+        << endl
         << "  --force   -f           Force a command." << endl
         << "  --quiet   -q           Output less information." << endl
         << "  --verbose -v           Output more information." << endl
@@ -100,78 +140,46 @@ void getOptions(int argc, char **argv)
     stringstream str;
 
     static struct option longOptions[] = {
-        //name,      has_arg,           flag, val
-        {"master",   required_argument, NULL, 'm'},
-        {"alias",    required_argument, NULL, 'a'},
-        {"position", required_argument, NULL, 'p'},
-        {"domain",   required_argument, NULL, 'd'},
-        {"type",     required_argument, NULL, 't'},
-        {"force",    no_argument,       NULL, 'f'},
-        {"quiet",    no_argument,       NULL, 'q'},
-        {"verbose",  no_argument,       NULL, 'v'},
-        {"help",     no_argument,       NULL, 'h'},
+        //name,         has_arg,           flag, val
+        {"master",      required_argument, NULL, 'm'},
+        {"alias",       required_argument, NULL, 'a'},
+        {"position",    required_argument, NULL, 'p'},
+        {"domain",      required_argument, NULL, 'd'},
+        {"type",        required_argument, NULL, 't'},
+        {"output-file", required_argument, NULL, 'o'},
+        {"force",       no_argument,       NULL, 'f'},
+        {"quiet",       no_argument,       NULL, 'q'},
+        {"verbose",     no_argument,       NULL, 'v'},
+        {"help",        no_argument,       NULL, 'h'},
         {}
     };
 
     do {
-        c = getopt_long(argc, argv, "m:a:p:d:t:fqvh", longOptions, NULL);
+        c = getopt_long(argc, argv, "m:a:p:d:t:o:fqvh", longOptions, NULL);
 
         switch (c) {
             case 'm':
-                str.clear();
-                str.str("");
-                str << optarg;
-                str >> resetiosflags(ios::basefield) // guess base from prefix
-                    >> masterIndex;
-                if (str.fail() || masterIndex < 0) {
-                    cerr << "Invalid master number " << optarg << "!" << endl
-                        << endl << usage();
-                    exit(1);
-                }
+                masters = optarg;
                 break;
 
             case 'a':
-                str.clear();
-                str.str("");
-                str << optarg;
-                str >> resetiosflags(ios::basefield) // guess base from prefix
-                    >> slaveAlias;
-                if (str.fail() || slaveAlias < 0 || slaveAlias > 0xFFFF) {
-                    cerr << "Invalid slave alias " << optarg << "!" << endl
-                        << endl << usage();
-                    exit(1);
-                }
+                aliases = optarg;
                 break;
 
             case 'p':
-                str.clear();
-                str.str("");
-                str << optarg;
-                str >> resetiosflags(ios::basefield) // guess base from prefix
-                    >> slavePosition;
-                if (str.fail()
-                        || slavePosition < 0 || slavePosition > 0xFFFF) {
-                    cerr << "Invalid slave position " << optarg << "!" << endl
-                        << endl << usage();
-                    exit(1);
-                }
+                positions = optarg;
                 break;
 
             case 'd':
-                str.clear();
-                str.str("");
-                str << optarg;
-                str >> resetiosflags(ios::basefield) // guess base from prefix
-                    >> domainIndex;
-                if (str.fail() || domainIndex < 0) {
-                    cerr << "Invalid domain index " << optarg << "!" << endl
-                        << endl << usage();
-                    exit(1);
-                }
+                domains = optarg;
                 break;
 
             case 't':
                 dataTypeStr = optarg;
+                break;
+
+            case 'o':
+                outputFile = optarg;
                 break;
 
             case 'f':
@@ -200,7 +208,7 @@ void getOptions(int argc, char **argv)
     }
     while (c != -1);
 
-	argCount = argc - optind;
+    argCount = argc - optind;
 
     if (!argCount) {
         if (helpRequested) {
@@ -211,7 +219,7 @@ void getOptions(int argc, char **argv)
                 << endl << usage();
             exit(1);
         }
-	}
+    }
 
     commandName = argv[optind];
     while (++optind < argc)
@@ -257,41 +265,54 @@ int main(int argc, char **argv)
 
     commandList.push_back(new CommandAlias());
     commandList.push_back(new CommandConfig());
+    commandList.push_back(new CommandCStruct());
     commandList.push_back(new CommandData());
     commandList.push_back(new CommandDebug());
     commandList.push_back(new CommandDomains());
     commandList.push_back(new CommandDownload());
+#ifdef EC_EOE
+    commandList.push_back(new CommandEoe());
+#endif
+    commandList.push_back(new CommandFoeRead());
+    commandList.push_back(new CommandFoeWrite());
+    commandList.push_back(new CommandGraph());
     commandList.push_back(new CommandMaster());
     commandList.push_back(new CommandPdos());
+    commandList.push_back(new CommandRegRead());
+    commandList.push_back(new CommandRegWrite());
+    commandList.push_back(new CommandRescan());
     commandList.push_back(new CommandSdos());
     commandList.push_back(new CommandSiiRead());
     commandList.push_back(new CommandSiiWrite());
     commandList.push_back(new CommandSlaves());
+    commandList.push_back(new CommandSoeRead());
+    commandList.push_back(new CommandSoeWrite());
     commandList.push_back(new CommandStates());
     commandList.push_back(new CommandUpload());
     commandList.push_back(new CommandVersion());
     commandList.push_back(new CommandXml());
 
-	getOptions(argc, argv);
+    getOptions(argc, argv);
 
     matchingCommands = getMatchingCommands(commandName);
-    masterDev.setIndex(masterIndex);
 
     if (matchingCommands.size()) {
         if (matchingCommands.size() == 1) {
             cmd = matchingCommands.front();
             if (!helpRequested) {
                 try {
+                    cmd->setMasters(masters);
                     cmd->setVerbosity(verbosity);
-                    cmd->setAlias(slaveAlias);
-                    cmd->setPosition(slavePosition);
-                    cmd->setDomain(domainIndex);
+                    cmd->setAliases(aliases);
+                    cmd->setPositions(positions);
+                    cmd->setDomains(domains);
                     cmd->setDataType(dataTypeStr);
+                    cmd->setOutputFile(outputFile);
                     cmd->setForce(force);
-                    cmd->execute(masterDev, commandArgs);
+                    cmd->execute(commandArgs);
                 } catch (InvalidUsageException &e) {
                     cerr << e.what() << endl << endl;
-                    cerr << binaryBaseName << " " << cmd->helpString();
+                    cerr << cmd->helpString(binaryBaseName);
                     retval = 1;
                 } catch (CommandException &e) {
                     cerr << e.what() << endl;
@@ -301,7 +322,7 @@ int main(int argc, char **argv)
                     retval = 1;
                 }
             } else {
-                cout << binaryBaseName << " " << cmd->helpString();
+                cout << cmd->helpString(binaryBaseName);
             }
         } else {
             cerr << "Ambiguous command abbreviation! Matching:" << endl;
@@ -319,7 +340,7 @@ int main(int argc, char **argv)
         retval = 1;
     }
 
-	return retval;
+    return retval;
 }
 
 /****************************************************************************/

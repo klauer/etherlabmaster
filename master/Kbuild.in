@@ -2,32 +2,30 @@
 #
 #  $Id$
 #
-#  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+#  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
 #
 #  This file is part of the IgH EtherCAT Master.
 #
-#  The IgH EtherCAT Master is free software; you can redistribute it
-#  and/or modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2 of the
-#  License, or (at your option) any later version.
+#  The IgH EtherCAT Master is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU General Public License version 2, as
+#  published by the Free Software Foundation.
 #
-#  The IgH EtherCAT Master is distributed in the hope that it will be
-#  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
+#  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+#  Public License for more details.
 #
-#  You should have received a copy of the GNU General Public License
-#  along with the IgH EtherCAT Master; if not, write to the Free Software
+#  You should have received a copy of the GNU General Public License along
+#  with the IgH EtherCAT Master; if not, write to the Free Software
 #  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
-#  The right to use EtherCAT Technology is granted and comes free of
-#  charge under condition of compatibility of product made by
-#  Licensee. People intending to distribute/sell products based on the
-#  code, have to sign an agreement to guarantee that products using
-#  software based on IgH EtherCAT master stay compatible with the actual
-#  EtherCAT specification (which are released themselves as an open
-#  standard) as the (only) precondition to have the right to use EtherCAT
-#  Technology, IP and trade marks.
+#  ---
+#  
+#  The license mentioned above concerns the source code only. Using the EtherCAT
+#  technology and brand is only permitted in compliance with the industrial
+#  property and similar rights of Beckhoff Automation GmbH.
+#
+#  ---
 #
 #  vi: syntax=make
 #
@@ -41,14 +39,18 @@ ec_master-objs := \
 	device.o \
 	domain.o \
 	fmmu_config.o \
+	foe_request.o \
 	fsm_change.o \
 	fsm_coe.o \
+	fsm_foe.o \
 	fsm_master.o \
 	fsm_pdo.o \
 	fsm_pdo_entry.o \
 	fsm_sii.o \
+	fsm_slave.o \
 	fsm_slave_config.o \
 	fsm_slave_scan.o \
+	fsm_soe.o \
 	mailbox.o \
 	master.o \
 	module.o \
@@ -60,8 +62,11 @@ ec_master-objs := \
 	sdo_request.o \
 	slave.o \
 	slave_config.o \
+	soe_errors.o \
+	soe_request.o \
 	sync.o \
-	sync_config.o
+	sync_config.o \
+	voe_handler.o
 
 ifeq (@ENABLE_EOE@,1)
 	ec_master-objs += ethernet.o
@@ -70,12 +75,12 @@ ifeq (@ENABLE_DEBUG_IF@,1)
 	ec_master-objs += debug.o
 endif
 
-REV := $(shell if test -s $(src)/../svnrevision; then \
-		cat $(src)/../svnrevision; \
+REV := $(shell if test -s $(src)/../revision; then \
+		cat $(src)/../revision; \
 	else \
-		svnversion $(src)/.. 2>/dev/null || echo "unknown"; \
+		hg id -i $(src)/.. 2>/dev/null || echo "unknown"; \
 	fi)
 
-CFLAGS_module.o := -DSVNREV=$(REV)
+CFLAGS_module.o := -DREV=$(REV)
 
 #------------------------------------------------------------------------------

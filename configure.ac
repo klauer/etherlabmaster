@@ -1,25 +1,48 @@
 #------------------------------------------------------------------------------
-# $Id$
+#
+#  $Id$
+#
+#  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+#
+#  This file is part of the IgH EtherCAT Master.
+#
+#  The IgH EtherCAT Master is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU General Public License version 2, as
+#  published by the Free Software Foundation.
+#
+#  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+#  Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License along
+#  with the IgH EtherCAT Master; if not, write to the Free Software
+#  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+#
+#  ---
+#  
+#  The license mentioned above concerns the source code only. Using the
+#  EtherCAT technology and brand is only permitted in compliance with the
+#  industrial property and similar rights of Beckhoff Automation GmbH.
+#
 #------------------------------------------------------------------------------
 
 AC_PREREQ(2.59)
-AC_INIT([ethercat],[1.4.0-rc1],[fp@igh-essen.com])
+AC_INIT([ethercat],[devel],[fp@igh-essen.com])
 AC_CONFIG_AUX_DIR([autoconf])
 AM_INIT_AUTOMAKE([-Wall -Werror dist-bzip2])
 AC_PREFIX_DEFAULT([/opt/etherlab])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_SRCDIR([config.h.in])
+AC_CONFIG_MACRO_DIR([m4])
 
 #------------------------------------------------------------------------------
 # Global
 #------------------------------------------------------------------------------
 
-branch=trunk
-
-AC_DEFINE_UNQUOTED(BRANCH, ["$branch"], [Subversion branch])
-AC_SUBST(BRANCH, [$branch])
-
 AC_PROG_CXX
+AC_PROG_LIBTOOL
+AM_PROG_CC_C_O
 
 #------------------------------------------------------------------------------
 # Linux sources
@@ -73,10 +96,47 @@ fi
 linuxversion=`echo $kernelrelease | grep -oE "^[[0-9]]+\.[[0-9]]+\.[[0-9]]+"`
 
 AC_SUBST(LINUX_SOURCE_DIR,[$sourcedir])
-AC_SUBST(LINUX_KERNEL_RELEASE,[$kernelrelease])
-AC_SUBST(LINUX_KERNEL_VERSION,[$linuxversion])
-AC_SUBST(LINUX_MOD_PATH,[/lib/modules/$kernelrelease/ethercat])
-AC_MSG_RESULT([$LINUX_SOURCE_DIR (Kernel $LINUX_KERNEL_RELEASE)])
+AC_MSG_RESULT([$LINUX_SOURCE_DIR (Kernel $linuxversion)])
+
+#------------------------------------------------------------------------------
+# Linux module installation subdirectory
+#------------------------------------------------------------------------------
+
+AC_ARG_WITH([module-dir],
+    AC_HELP_STRING(
+        [--with-module-dir=<DIR>],
+        [Linux module installation dir. Default: ethercat]
+    ),
+    [moddir=[$withval]],
+    [moddir="ethercat"]
+)
+AC_SUBST(INSTALL_MOD_DIR,[$moddir])
+
+AC_MSG_CHECKING([for Linux modules installation directory])
+AC_MSG_RESULT([$INSTALL_MOD_DIR])
+
+#------------------------------------------------------------------------------
+# Generic Ethernet driver
+#------------------------------------------------------------------------------
+
+AC_ARG_ENABLE([generic],
+    AS_HELP_STRING([--enable-generic],
+                   [Enable generic Ethernet driver]),
+    [
+        case "${enableval}" in
+            yes) enablegeneric=1
+                ;;
+            no) enablegeneric=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-generic])
+                ;;
+        esac
+    ],
+    [enablegeneric=0]
+)
+
+AM_CONDITIONAL(ENABLE_GENERIC, test "x$enablegeneric" = "x1")
+AC_SUBST(ENABLE_GENERIC,[$enablegeneric])
 
 #------------------------------------------------------------------------------
 # 8139too driver
@@ -189,61 +249,6 @@ fi
 AC_SUBST(KERNEL_E100,[$kernele100])
 
 #------------------------------------------------------------------------------
-# forcedeth driver
-#------------------------------------------------------------------------------
-
-AC_ARG_ENABLE([forcedeth],
-    AS_HELP_STRING([--enable-forcedeth],
-                   [Enable forcedeth driver]),
-    [
-        case "${enableval}" in
-            yes) enableforcedeth=1
-                ;;
-            no) enableforcedeth=0
-                ;;
-            *) AC_MSG_ERROR([Invalid value for --enable-forcedeth])
-                ;;
-        esac
-    ],
-    [enableforcedeth=0] # disabled by default!
-)
-
-AM_CONDITIONAL(ENABLE_FORCEDETH, test "x$enableforcedeth" = "x1")
-AC_SUBST(ENABLE_FORCEDETH,[$enableforcedeth])
-
-AC_ARG_WITH([forcedeth-kernel],
-    AC_HELP_STRING(
-        [--with-forcedeth-kernel=<X.Y.Z>],
-        [forcedeth kernel (only if differing)]
-    ),
-    [
-        kernelforcedeth=[$withval]
-    ],
-    [
-        kernelforcedeth=$linuxversion
-    ]
-)
-
-if test "x${enableforcedeth}" = "x1"; then
-    AC_MSG_CHECKING([for kernel for forcedeth driver])
-
-    kernels=`ls -1 ${srcdir}/devices/ | grep -oE "^forcedeth-.*-" | cut -d "-" -f 2 | uniq`
-    found=0
-    for k in $kernels; do
-        if test "$kernelforcedeth" = "$k"; then
-            found=1
-        fi
-    done
-    if test $found -ne 1; then
-        AC_MSG_ERROR([kernel $kernelforcedeth not available for forcedeth driver!])
-    fi
-
-    AC_MSG_RESULT([$kernelforcedeth])
-fi
-
-AC_SUBST(KERNEL_FORCEDETH,[$kernelforcedeth])
-
-#------------------------------------------------------------------------------
 # e1000 driver
 #------------------------------------------------------------------------------
 
@@ -307,19 +312,19 @@ AC_ARG_ENABLE([r8169],
                    [Enable r8169 driver]),
     [
         case "${enableval}" in
-            yes) enabler8169=1
+            yes) enable_r8169=1
                 ;;
-            no) enabler8169=0
+            no) enable_r8169=0
                 ;;
             *) AC_MSG_ERROR([Invalid value for --enable-r8169])
                 ;;
         esac
     ],
-    [enabler8169=0] # disabled by default
+    [enable_r8169=0] # disabled by default
 )
 
-AM_CONDITIONAL(ENABLE_R8169, test "x$enabler8169" = "x1")
-AC_SUBST(ENABLE_R8169,[$enabler8169])
+AM_CONDITIONAL(ENABLE_R8169, test "x$enable_r8169" = "x1")
+AC_SUBST(ENABLE_R8169,[$enable_r8169])
 
 AC_ARG_WITH([r8169-kernel],
     AC_HELP_STRING(
@@ -327,31 +332,31 @@ AC_ARG_WITH([r8169-kernel],
         [r8169 kernel (only if differing)]
     ),
     [
-        kernelr8169=[$withval]
+        kernel_r8169=[$withval]
     ],
     [
-        kernelr8169=$linuxversion
+        kernel_r8169=$linuxversion
     ]
 )
 
-if test "x${enabler8169}" = "x1"; then
+if test "x${enable_r8169}" = "x1"; then
     AC_MSG_CHECKING([for kernel for r8169 driver])
 
     kernels=`ls -1 ${srcdir}/devices/ | grep -oE "^r8169-.*-" | cut -d "-" -f 2 | uniq`
     found=0
     for k in $kernels; do
-        if test "$kernelr8169" = "$k"; then
+        if test "$kernel_r8169" = "$k"; then
             found=1
         fi
     done
     if test $found -ne 1; then
-        AC_MSG_ERROR([kernel $kernelr8169 not available for r8169 driver!])
+        AC_MSG_ERROR([kernel $kernel_r8169 not available for r8169 driver!])
     fi
 
-    AC_MSG_RESULT([$kernelr8169])
+    AC_MSG_RESULT([$kernel_r8169])
 fi
 
-AC_SUBST(KERNEL_R8169,[$kernelr8169])
+AC_SUBST(KERNEL_R8169,[$kernel_r8169])
 
 #------------------------------------------------------------------------------
 # RTAI path (optional)
@@ -360,13 +365,15 @@ AC_SUBST(KERNEL_R8169,[$kernelr8169])
 AC_ARG_WITH([rtai-dir],
     AC_HELP_STRING(
         [--with-rtai-dir=<DIR>],
-        [RTAI path (only for RTAI examples)]
+        [RTAI path (only for RTDM Interface or RTAI examples)]
     ),
     [
         rtaidir=[$withval]
+        rtai=1
     ],
     [
         rtaidir=""
+        rtai=0
     ]
 )
 
@@ -382,6 +389,71 @@ else
 fi
 
 AC_SUBST(RTAI_DIR,[$rtaidir])
+AM_CONDITIONAL(ENABLE_RTAI, test "x$rtai" = "x1")
+AC_SUBST(ENABLE_RTAI,[$rtai])
+
+#------------------------------------------------------------------------------
+# Xenomai path (optional)
+#------------------------------------------------------------------------------
+
+AC_ARG_WITH([xenomai-dir],
+    AC_HELP_STRING(
+        [--with-xenomai-dir=<DIR>],
+        [Xenomai path (only for RTDM Interface)]
+    ),
+    [
+        xenomaidir=[$withval]
+        xeno=1
+    ],
+    [
+        xenomaidir=""
+        xeno=0
+    ]
+)
+
+AC_MSG_CHECKING([for Xenomai path])
+
+if test -z "${xenomaidir}"; then
+    AC_MSG_RESULT([not specified.])
+else
+    if test \! -r ${xenomaidir}/include/xeno_config.h; then
+        AC_MSG_ERROR([no Xenomai installation found in ${xenomaidir}!])
+    fi
+    AC_MSG_RESULT([$xenomaidir])
+fi
+
+AC_SUBST(XENOMAI_DIR,[$xenomaidir])
+AM_CONDITIONAL(ENABLE_XENOMAI, test "x$xeno" = "x1")
+AC_SUBST(ENABLE_XENOMAI,[$xeno])
+
+#------------------------------------------------------------------------------
+# RTDM Interface (optional)
+#------------------------------------------------------------------------------
+
+AC_ARG_ENABLE([rtdm],
+    AC_HELP_STRING(
+        [--enable-rtdm],
+        [Enable RTDM Interface, depends on RTAI or Xenomai]
+    ),
+    [
+        case "${enableval}" in
+            yes) rtdm=1
+                ;;
+            no) rtdm=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-rtdm])
+                ;;
+        esac
+    ],
+    [rtdm=0]
+)
+
+if test "x${rtdm}" = "x1"; then
+    AC_DEFINE([EC_RTDM], [1], [RTDM interfaces enabled])
+fi
+AM_CONDITIONAL(ENABLE_RTDM, test "x$rtdm" = "x1")
+AC_SUBST(ENABLE_RTDM,[$rtdm])
+
 
 #------------------------------------------------------------------------------
 # Debug interface
@@ -434,7 +506,7 @@ if test "x${debugring}" = "x1"; then
 fi
 
 #------------------------------------------------------------------------------
-# Ethernet-over-EtherCAT support
+# Ethernet over EtherCAT support
 #------------------------------------------------------------------------------
 
 AC_ARG_ENABLE([eoe],
@@ -484,6 +556,147 @@ if test "x${cycles}" = "x1"; then
 fi
 
 #------------------------------------------------------------------------------
+# High-resolution timer support
+#------------------------------------------------------------------------------
+
+AC_ARG_ENABLE([hrtimer],
+    AS_HELP_STRING([--enable-hrtimer],
+                   [Use high-resolution timer for scheduling (default: no)]),
+    [
+        case "${enableval}" in
+            yes) hrtimer=1
+                ;;
+            no) hrtimer=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-hrtimer])
+                ;;
+        esac
+    ],
+    [hrtimer=0]
+)
+
+if test "x${hrtimer}" = "x1"; then
+    AC_DEFINE([EC_USE_HRTIMER], [1], [Use hrtimer for scheduling])
+fi
+
+#------------------------------------------------------------------------------
+# Use 2 datagrams (payload+last-byte) when sending to mailbox (reduces frame size)
+#------------------------------------------------------------------------------
+
+AC_ARG_ENABLE([mboxframesize],
+    AS_HELP_STRING([--enable-mboxframesize],
+                   [Reduced frame size when sending to mailbox, uses 2 datagrams (default: no)]),
+    [
+        case "${enableval}" in
+            yes) mboxframesize=1
+                ;;
+            no) mboxframesize=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-mboxframesize])
+                ;;
+        esac
+    ],
+    [mboxframesize=0]
+)
+
+if test "x${mboxframesize}" = "x1"; then
+    AC_DEFINE([EC_REDUCE_MBOXFRAMESIZE], [1], [Reduced frame size when sending to mailbox])
+fi
+
+
+#------------------------------------------------------------------------------
+# Read alias address from register
+#------------------------------------------------------------------------------
+
+AC_ARG_ENABLE([regalias],
+    AS_HELP_STRING([--enable-regalias],
+                   [Read alias adresses from register (default: no)]),
+    [
+        case "${enableval}" in
+            yes) regalias=1
+                ;;
+            no) regalias=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-regalias])
+                ;;
+        esac
+    ],
+    [regalias=0]
+)
+
+if test "x${regalias}" = "x1"; then
+    AC_DEFINE([EC_REGALIAS], [1], [Read alias adresses from register])
+fi
+
+
+#------------------------------------------------------------------------------
+# Command-line tool
+#-----------------------------------------------------------------------------
+
+AC_ARG_ENABLE([tool],
+    AS_HELP_STRING([--enable-tool],
+                   [Build command-line tool (default: yes)]),
+    [
+        case "${enableval}" in
+            yes) tool=1
+                ;;
+            no) tool=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-tool])
+                ;;
+        esac
+    ],
+    [tool=1]
+)
+
+AM_CONDITIONAL(BUILD_TOOL, test "x$tool" = "x1")
+
+#------------------------------------------------------------------------------
+# Userspace library generation
+#------------------------------------------------------------------------------
+
+AC_ARG_ENABLE([userlib],
+    AS_HELP_STRING([--enable-userlib],
+                   [Generation of the userspace library (default: yes)]),
+    [
+        case "${enableval}" in
+            yes) userlib=1
+                ;;
+            no) userlib=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-userlib])
+                ;;
+        esac
+    ],
+    [userlib=1]
+)
+
+AM_CONDITIONAL(ENABLE_USERLIB, test "x$userlib" = "x1")
+
+#------------------------------------------------------------------------------
+# TTY driver
+#------------------------------------------------------------------------------
+
+AC_ARG_ENABLE([tty],
+    AS_HELP_STRING([--enable-tty],
+                   [Generation of the ec_tty module (default: no)]),
+    [
+        case "${enableval}" in
+            yes) tty=1
+                ;;
+            no) tty=0
+                ;;
+            *) AC_MSG_ERROR([Invalid value for --enable-tty])
+                ;;
+        esac
+    ],
+    [tty=0]
+)
+
+AM_CONDITIONAL(ENABLE_TTY, test "x$tty" = "x1")
+AC_SUBST(ENABLE_TTY,[$tty])
+
+#------------------------------------------------------------------------------
 
 AC_CONFIG_FILES([
         Doxyfile
@@ -493,12 +706,25 @@ AC_CONFIG_FILES([
         devices/Makefile
         devices/e1000/Kbuild
         devices/e1000/Makefile
+        ethercat.spec
+        examples/Kbuild
         examples/Makefile
+        examples/dc_rtai/Kbuild
+        examples/dc_rtai/Makefile
+        examples/dc_user/Makefile
         examples/mini/Kbuild
         examples/mini/Makefile
         examples/rtai/Kbuild
         examples/rtai/Makefile
+        examples/tty/Kbuild
+        examples/tty/Makefile
+        examples/user/Makefile
+        examples/xenomai/Makefile
+        examples/xenomai_posix/Makefile
+        examples/rtai_rtdm/Makefile
         include/Makefile
+        lib/Makefile
+        m4/Makefile
         master/Kbuild
         master/Makefile
         script/Makefile
@@ -506,6 +732,10 @@ AC_CONFIG_FILES([
         script/init.d/ethercat
         script/sysconfig/Makefile
         tool/Makefile
+        tty/Kbuild
+        tty/Makefile
+        rtdm/Makefile
+        rtdm/Kbuild
 ])
 AC_OUTPUT
 

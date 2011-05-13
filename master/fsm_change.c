@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -41,6 +37,12 @@
 #include "globals.h"
 #include "master.h"
 #include "fsm_change.h"
+
+/*****************************************************************************/
+
+/** Timeout while waiting for AL state change [s].
+ */
+#define EC_AL_STATE_CHANGE_TIMEOUT 5
 
 /*****************************************************************************/
 
@@ -180,9 +182,8 @@ void ec_fsm_change_state_check(ec_fsm_change_t *fsm
 
     if (datagram->state != EC_DATAGRAM_RECEIVED) {
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Failed to receive state datagram from slave %u"
-                " (datagram state %u)!\n",
-               fsm->slave->ring_position, datagram->state);
+        EC_SLAVE_ERR(slave, "Failed to receive state datagram: ");
+        ec_datagram_print_state(datagram);
         return;
     }
 
@@ -194,10 +195,9 @@ void ec_fsm_change_state_check(ec_fsm_change_t *fsm
     if (datagram->working_counter == 0) {
         if (datagram->jiffies_received - fsm->jiffies_start >= 3 * HZ) {
             char state_str[EC_STATE_STRING_SIZE];
-            ec_state_string(fsm->requested_state, state_str);
+            ec_state_string(fsm->requested_state, state_str, 0);
             fsm->state = ec_fsm_change_state_error;
-            EC_ERR("Failed to set state %s on slave %u: ",
-                    state_str, fsm->slave->ring_position);
+            EC_SLAVE_ERR(slave, "Failed to set state %s: ", state_str);
             ec_datagram_print_wc_error(datagram);
             return;
         }
@@ -211,10 +211,9 @@ void ec_fsm_change_state_check(ec_fsm_change_t *fsm
 
     if (unlikely(datagram->working_counter > 1)) {
         char state_str[EC_STATE_STRING_SIZE];
-        ec_state_string(fsm->requested_state, state_str);
+        ec_state_string(fsm->requested_state, state_str, 0);
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Failed to set state %s on slave %u: ",
-                state_str, fsm->slave->ring_position);
+        EC_SLAVE_ERR(slave, "Failed to set state %s: ", state_str);
         ec_datagram_print_wc_error(datagram);
         return;
     }
@@ -223,6 +222,7 @@ void ec_fsm_change_state_check(ec_fsm_change_t *fsm
 
     // read AL status from slave
     ec_datagram_fprd(datagram, slave->station_address, 0x0130, 2);
+    ec_datagram_zero(datagram);
     fsm->retries = EC_FSM_RETRIES;
     fsm->spontaneous_change = 0;
     fsm->state = ec_fsm_change_state_status;
@@ -245,18 +245,16 @@ void ec_fsm_change_state_status(ec_fsm_change_t *fsm
 
     if (datagram->state != EC_DATAGRAM_RECEIVED) {
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Failed to receive state checking datagram from slave %u"
-                " (datagram state %u).\n",
-               slave->ring_position, datagram->state);
+        EC_SLAVE_ERR(slave, "Failed to receive state checking datagram: ");
+        ec_datagram_print_state(datagram);
         return;
     }
 
     if (datagram->working_counter != 1) {
         char req_state[EC_STATE_STRING_SIZE];
-        ec_state_string(fsm->requested_state, req_state);
+        ec_state_string(fsm->requested_state, req_state, 0);
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Failed to check state %s on slave %u: ",
-               req_state, slave->ring_position);
+        EC_SLAVE_ERR(slave, "Failed to check state %s: ", req_state);
         ec_datagram_print_wc_error(datagram);
         return;
     }
@@ -277,7 +275,7 @@ void ec_fsm_change_state_status(ec_fsm_change_t *fsm
     if (slave->current_state != fsm->old_state) { // state changed
         char req_state[EC_STATE_STRING_SIZE], cur_state[EC_STATE_STRING_SIZE];
 
-        ec_state_string(slave->current_state, cur_state);
+        ec_state_string(slave->current_state, cur_state, 0);
 
         if ((slave->current_state & 0x0F) != (fsm->old_state & 0x0F)) {
             // Slave spontaneously changed its state just before the new state
@@ -285,20 +283,21 @@ void ec_fsm_change_state_status(ec_fsm_change_t *fsm
             // state change
             fsm->spontaneous_change = 1;
             fsm->old_state = slave->current_state;
-            EC_WARN("Slave %u changed to %s in the meantime.\n",
-                    slave->ring_position, cur_state);
+            EC_SLAVE_WARN(slave, "Changed to %s in the meantime.\n",
+                    cur_state);
             goto check_again;
         }
 
         // state change error
 
         slave->error_flag = 1;
-        ec_state_string(fsm->requested_state, req_state);
+        ec_state_string(fsm->requested_state, req_state, 0);
 
-        EC_ERR("Failed to set %s state, slave %u refused state change (%s).\n",
-               req_state, slave->ring_position, cur_state);
+        EC_SLAVE_ERR(slave, "Failed to set %s state, slave refused state"
+                " change (%s).\n", req_state, cur_state);
         // fetch AL status error code
         ec_datagram_fprd(datagram, slave->station_address, 0x0134, 2);
+        ec_datagram_zero(datagram);
         fsm->retries = EC_FSM_RETRIES;
         fsm->state = ec_fsm_change_state_code;
         return;
@@ -306,19 +305,20 @@ void ec_fsm_change_state_status(ec_fsm_change_t *fsm
 
     // still old state
 
-    if (datagram->jiffies_received - fsm->jiffies_start >= HZ) { // 1s
+    if (datagram->jiffies_received - fsm->jiffies_start >=
+            EC_AL_STATE_CHANGE_TIMEOUT * HZ) {
         // timeout while checking
         char state_str[EC_STATE_STRING_SIZE];
-        ec_state_string(fsm->requested_state, state_str);
+        ec_state_string(fsm->requested_state, state_str, 0);
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Timeout while setting state %s on slave %u.\n",
-                state_str, slave->ring_position);
+        EC_SLAVE_ERR(slave, "Timeout while setting state %s.\n", state_str);
         return;
     }
 
  check_again:
     // no timeout yet. check again
     ec_datagram_fprd(datagram, slave->station_address, 0x0130, 2);
+    ec_datagram_zero(datagram);
     fsm->retries = EC_FSM_RETRIES;
 }
 
@@ -329,8 +329,10 @@ void ec_fsm_change_state_status(ec_fsm_change_t *fsm
 */
 
 const ec_code_msg_t al_status_messages[] = {
+    {0x0000, "No error"},
     {0x0001, "Unspecified error"},
-    {0x0011, "Invalud requested state change"},
+    {0x0002, "No Memory"},
+    {0x0011, "Invalid requested state change"},
     {0x0012, "Unknown requested state"},
     {0x0013, "Bootstrap not supported"},
     {0x0014, "No valid firmware"},
@@ -339,7 +341,7 @@ const ec_code_msg_t al_status_messages[] = {
     {0x0017, "Invalid sync manager configuration"},
     {0x0018, "No valid inputs available"},
     {0x0019, "No valid outputs"},
-    {0x001A, "Synchronisation error"},
+    {0x001A, "Synchronization error"},
     {0x001B, "Sync manager watchdog"},
     {0x001C, "Invalid sync manager types"},
     {0x001D, "Invalid output configuration"},
@@ -349,18 +351,36 @@ const ec_code_msg_t al_status_messages[] = {
     {0x0021, "Slave needs INIT"},
     {0x0022, "Slave needs PREOP"},
     {0x0023, "Slave needs SAFEOP"},
+    {0x0024, "Invalid Input Mapping"},
+    {0x0025, "Invalid Output Mapping"},
+    {0x0026, "Inconsistent Settings"},
+    {0x0027, "Freerun not supported"},
+    {0x0028, "Synchronization not supported"},
+    {0x0029, "Freerun needs 3 Buffer Mode"},
+    {0x002A, "Background Watchdog"},
+    {0x002B, "No Valid Inputs and Outputs"},
+    {0x002C, "Fatal Sync Error"},
+    {0x002D, "No Sync Error"},
     {0x0030, "Invalid DC SYNCH configuration"},
     {0x0031, "Invalid DC latch configuration"},
     {0x0032, "PLL error"},
-    {0x0033, "Invalid DC IO error"},
-    {0x0034, "Invalid DC timeout error"},
-    {0x0042, "MBOX EOE"},
-    {0x0043, "MBOX COE"},
-    {0x0044, "MBOX FOE"},
-    {0x0045, "MBOX SOE"},
-    {0x004F, "MBOX VOE"},
-    {}
+    {0x0033, "DC Sync IO Error"},
+    {0x0034, "DC Sync Timeout Error"},
+    {0x0035, "DC Invalid Sync Cycle Time"},
+    {0x0036, "DC Sync0 Cycle Time"},
+    {0x0037, "DC Sync1 Cycle Time"},
+    {0x0041, "MBX_AOE"},
+    {0x0042, "MBX_EOE"},
+    {0x0043, "MBX_COE"},
+    {0x0044, "MBX_FOE"},
+    {0x0045, "MBX_SOE"},
+    {0x004F, "MBX_VOE"},
+    {0x0050, "EEPROM No Access"},
+    {0x0051, "EEPROM Error"},
+    {0x0060, "Slave Restarted Locally"},
+    {0xffff}
 };
+
 
 /*****************************************************************************/
 
@@ -380,25 +400,27 @@ void ec_fsm_change_state_code(ec_fsm_change_t *fsm
 
     if (datagram->state != EC_DATAGRAM_RECEIVED) {
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Failed to receive AL status code datagram from slave %u"
-                " (datagram state %u).\n",
-               fsm->slave->ring_position, datagram->state);
+        EC_SLAVE_ERR(fsm->slave, "Failed to receive"
+                " AL status code datagram: ");
+        ec_datagram_print_state(datagram);
         return;
     }
 
     if (datagram->working_counter != 1) {
-        EC_WARN("Reception of AL status code datagram failed: ");
+        EC_SLAVE_WARN(fsm->slave, "Reception of AL status code"
+                " datagram failed: ");
         ec_datagram_print_wc_error(datagram);
     } else {
         code = EC_READ_U16(datagram->data);
-        for (al_msg = al_status_messages; al_msg->code; al_msg++) {
+        for (al_msg = al_status_messages; al_msg->code != 0xffff; al_msg++) {
             if (al_msg->code != code) continue;
-            EC_ERR("AL status message 0x%04X: \"%s\".\n",
+            EC_SLAVE_ERR(fsm->slave, "AL status message 0x%04X: \"%s\".\n",
                     al_msg->code, al_msg->message);
             break;
         }
         if (!al_msg->code)
-            EC_ERR("Unknown AL status code 0x%04X.\n", code);
+            EC_SLAVE_ERR(fsm->slave, "Unknown AL status code 0x%04X.\n",
+                    code);
     }
 
     // acknowledge "old" slave state
@@ -439,16 +461,14 @@ void ec_fsm_change_state_ack(ec_fsm_change_t *fsm /**< finite state machine */)
 
     if (datagram->state != EC_DATAGRAM_RECEIVED) {
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Failed to receive state ack datagram for slave %u"
-                " (datagram state %u).\n",
-               slave->ring_position, datagram->state);
+        EC_SLAVE_ERR(slave, "Failed to receive state ack datagram: ");
+        ec_datagram_print_state(datagram);
         return;
     }
 
     if (datagram->working_counter != 1) {
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Reception of state ack datagram failed on slave %u: ",
-                slave->ring_position);
+        EC_SLAVE_ERR(slave, "Reception of state ack datagram failed: ");
         ec_datagram_print_wc_error(datagram);
         return;
     }
@@ -457,6 +477,7 @@ void ec_fsm_change_state_ack(ec_fsm_change_t *fsm /**< finite state machine */)
 
     // read new AL status
     ec_datagram_fprd(datagram, slave->station_address, 0x0130, 2);
+    ec_datagram_zero(datagram);
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_change_state_check_ack;
 }
@@ -478,16 +499,14 @@ void ec_fsm_change_state_check_ack(ec_fsm_change_t *fsm
 
     if (datagram->state != EC_DATAGRAM_RECEIVED) {
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Failed to receive state ack check datagram from slave %u"
-                " (datagram state %u).\n",
-               slave->ring_position, datagram->state);
+        EC_SLAVE_ERR(slave, "Failed to receive state ack check datagram: ");
+        ec_datagram_print_state(datagram);
         return;
     }
 
     if (datagram->working_counter != 1) {
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Reception of state ack check datagram failed on slave %u: ",
-                slave->ring_position);
+        EC_SLAVE_ERR(slave, "Reception of state ack check datagram failed: ");
         ec_datagram_print_wc_error(datagram);
         return;
     }
@@ -501,30 +520,31 @@ void ec_fsm_change_state_check_ack(ec_fsm_change_t *fsm
 
     if (!(slave->current_state & EC_SLAVE_STATE_ACK_ERR)) {
         char state_str[EC_STATE_STRING_SIZE];
-        ec_state_string(slave->current_state, state_str);
+        ec_state_string(slave->current_state, state_str, 0);
         if (fsm->mode == EC_FSM_CHANGE_MODE_FULL) {
             fsm->state = ec_fsm_change_state_error;
         }
         else { // EC_FSM_CHANGE_MODE_ACK_ONLY
             fsm->state = ec_fsm_change_state_end;
         }
-        EC_INFO("Acknowledged state %s on slave %u.\n",
-                state_str, slave->ring_position);
+        EC_SLAVE_INFO(slave, "Acknowledged state %s.\n", state_str);
         return;
     }
 
-    if (datagram->jiffies_received - fsm->jiffies_start >= HZ) { // 1s
+    if (datagram->jiffies_received - fsm->jiffies_start >=
+            EC_AL_STATE_CHANGE_TIMEOUT * HZ) {
         // timeout while checking
         char state_str[EC_STATE_STRING_SIZE];
-        ec_state_string(slave->current_state, state_str);
+        ec_state_string(slave->current_state, state_str, 0);
         fsm->state = ec_fsm_change_state_error;
-        EC_ERR("Timeout while acknowledging state %s on slave %u.\n",
-               state_str, slave->ring_position);
+        EC_SLAVE_ERR(slave, "Timeout while acknowledging state %s.\n",
+                state_str);
         return;
     }
 
     // reread new AL status
     ec_datagram_fprd(datagram, slave->station_address, 0x0130, 2);
+    ec_datagram_zero(datagram);
     fsm->retries = EC_FSM_RETRIES;
 }
 

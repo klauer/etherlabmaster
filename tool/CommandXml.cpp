@@ -1,14 +1,39 @@
 /*****************************************************************************
  *
- * $Id$
+ *  $Id$
+ *
+ *  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+ *
+ *  This file is part of the IgH EtherCAT Master.
+ *
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
+ *
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  ****************************************************************************/
 
 #include <iostream>
 #include <iomanip>
+#include <string.h>
 using namespace std;
 
 #include "CommandXml.h"
+#include "MasterDevice.h"
 
 /*****************************************************************************/
 
@@ -19,17 +44,17 @@ CommandXml::CommandXml():
 
 /*****************************************************************************/
 
-string CommandXml::helpString() const
+string CommandXml::helpString(const string &binaryBaseName) const
 {
     stringstream str;
 
-    str << getName() << " [OPTIONS]" << endl
+    str << binaryBaseName << " " << getName() << " [OPTIONS]" << endl
         << endl
         << getBriefDescription() << endl
         << endl
-        << "Note that the Pdo information can either originate" << endl
+        << "Note that the PDO information can either originate" << endl
         << "from the SII or from the CoE communication area. For" << endl
-        << "slaves, that support configuring Pdo assignment and" << endl
+        << "slaves, that support configuring PDO assignment and" << endl
         << "mapping, the output depends on the last configuration." << endl
         << endl
         << "Command-specific options:" << endl
@@ -44,16 +69,32 @@ string CommandXml::helpString() const
 
 /****************************************************************************/
 
-void CommandXml::execute(MasterDevice &m, const StringVector &args)
+void CommandXml::execute(const StringVector &args)
 {
     SlaveList slaves;
     SlaveList::const_iterator si;
 
+    if (args.size()) {
+        stringstream err;
+        err << "'" << getName() << "' takes no arguments!";
+        throwInvalidUsageException(err);
+    }
+
+    MasterDevice m(getSingleMasterIndex());
     m.open(MasterDevice::Read);
     slaves = selectedSlaves(m);
 
+    cout << "<?xml version=\"1.0\" ?>" << endl;
+    if (slaves.size() > 1) {
+        cout << "<EtherCATInfoList>" << endl;
+    }
+
     for (si = slaves.begin(); si != slaves.end(); si++) {
-        generateSlaveXml(m, *si);
+        generateSlaveXml(m, *si, slaves.size() > 1 ? 1 : 0);
+    }
+
+    if (slaves.size() > 1) {
+        cout << "</EtherCATInfoList>" << endl;
     }
 }
 
@@ -61,26 +102,30 @@ void CommandXml::execute(MasterDevice &m, const StringVector &args)
 
 void CommandXml::generateSlaveXml(
         MasterDevice &m,
-        const ec_ioctl_slave_t &slave
+        const ec_ioctl_slave_t &slave,
+        unsigned int indent
         )
 {
     ec_ioctl_slave_sync_t sync;
     ec_ioctl_slave_sync_pdo_t pdo;
-    string pdoType;
+    string pdoType, in;
     ec_ioctl_slave_sync_pdo_entry_t entry;
     unsigned int i, j, k;
+
+    for (i = 0; i < indent; i++) {
+        in += "  ";
+    }
     
     cout
-        << "<?xml version=\"1.0\" ?>" << endl
-        << "  <EtherCATInfo>" << endl
-        << "    <!-- Slave " << slave.position << " -->" << endl
-        << "    <Vendor>" << endl
-        << "      <Id>" << slave.vendor_id << "</Id>" << endl
-        << "    </Vendor>" << endl
-        << "    <Descriptions>" << endl
-        << "      <Devices>" << endl
-        << "        <Device>" << endl
-        << "          <Type ProductCode=\"#x"
+        << in << "<EtherCATInfo>" << endl
+        << in << "  <!-- Slave " << slave.position << " -->" << endl
+        << in << "  <Vendor>" << endl
+        << in << "    <Id>" << slave.vendor_id << "</Id>" << endl
+        << in << "  </Vendor>" << endl
+        << in << "  <Descriptions>" << endl
+        << in << "    <Devices>" << endl
+        << in << "      <Device>" << endl
+        << in << "        <Type ProductCode=\"#x"
         << hex << setfill('0') << setw(8) << slave.product_code
         << "\" RevisionNo=\"#x"
         << hex << setfill('0') << setw(8) << slave.revision_number
@@ -88,7 +133,7 @@ void CommandXml::generateSlaveXml(
 
     if (strlen(slave.name)) {
         cout
-            << "          <Name><![CDATA["
+            << in << "        <Name><![CDATA["
             << slave.name
             << "]]></Name>" << endl;
     }
@@ -97,10 +142,10 @@ void CommandXml::generateSlaveXml(
         m.getSync(&sync, slave.position, i);
 
         cout
-            << "          <Sm Enable=\"" << dec << (unsigned int) sync.enable
-            << "\" StartAddress=\"" << sync.physical_start_address
-            << "\" ControlByte=\"" << (unsigned int) sync.control_register
-            << "\" DefaultSize=\"" << sync.default_size
+            << in << "        <Sm Enable=\"" << dec << (unsigned int) sync.enable
+            << "\" StartAddress=\"#x" << hex << sync.physical_start_address
+            << "\" ControlByte=\"#x" << hex << (unsigned int) sync.control_register
+            << "\" DefaultSize=\"" << dec << sync.default_size
             << "\" />" << endl;
     }
 
@@ -110,70 +155,71 @@ void CommandXml::generateSlaveXml(
         for (j = 0; j < sync.pdo_count; j++) {
             m.getPdo(&pdo, slave.position, i, j);
             pdoType = (sync.control_register & 0x04 ? "R" : "T");
-            pdoType += "xPdo";
+            pdoType += "xPdo"; // last 2 letters lowercase in XML!
 
             cout
-                << "          <" << pdoType
+                << in << "        <" << pdoType
                 << " Sm=\"" << i << "\" Fixed=\"1\" Mandatory=\"1\">" << endl
-                << "            <Index>#x"
+                << in << "          <Index>#x"
                 << hex << setfill('0') << setw(4) << pdo.index
                 << "</Index>" << endl
-                << "            <Name>" << pdo.name << "</Name>" << endl;
+                << in << "          <Name>" << pdo.name << "</Name>" << endl;
 
             for (k = 0; k < pdo.entry_count; k++) {
                 m.getPdoEntry(&entry, slave.position, i, j, k);
 
                 cout
-                    << "            <Entry>" << endl
-                    << "              <Index>#x"
+                    << in << "          <Entry>" << endl
+                    << in << "            <Index>#x"
                     << hex << setfill('0') << setw(4) << entry.index
                     << "</Index>" << endl;
                 if (entry.index)
                     cout
-                        << "              <SubIndex>"
+                        << in << "            <SubIndex>"
                         << dec << (unsigned int) entry.subindex
                         << "</SubIndex>" << endl;
                 
                 cout
-                    << "              <BitLen>"
+                    << in << "            <BitLen>"
                     << dec << (unsigned int) entry.bit_length
                     << "</BitLen>" << endl;
 
                 if (entry.index) {
                     cout
-                        << "              <Name>" << entry.name
+                        << in << "            <Name>" << entry.name
                         << "</Name>" << endl
-                        << "              <DataType>";
+                        << in << "            <DataType>";
 
                     if (entry.bit_length == 1) {
                         cout << "BOOL";
                     } else if (!(entry.bit_length % 8)) {
-                        if (entry.bit_length <= 64)
+                        if (entry.bit_length <= 64) {
                             cout << "UINT" << (unsigned int) entry.bit_length;
-                        else
+                        } else {
                             cout << "STRING("
                                 << (unsigned int) (entry.bit_length / 8)
                                 << ")";
+                        }
                     } else {
-                        cerr << "Invalid bit length "
-                            << (unsigned int) entry.bit_length << endl;
+                        cout << "BIT" << (unsigned int) entry.bit_length;
                     }
 
-                        cout << "</DataType>" << endl;
+                    cout << "</DataType>" << endl;
                 }
 
-                cout << "            </Entry>" << endl;
+                cout << in << "          </Entry>" << endl;
             }
 
             cout
-                << "          </" << pdoType << ">" << endl;
+                << in << "        </" << pdoType << ">" << endl;
         }
     }
 
     cout
-        << "        </Device>" << endl
-        << "     </Devices>" << endl
-        << "  </Descriptions>" << endl
-        << "</EtherCATInfo>" << endl;
+        << in << "      </Device>" << endl
+        << in << "    </Devices>" << endl
+        << in << "  </Descriptions>" << endl
+        << in << "</EtherCATInfo>" << endl;
 }
+
 /*****************************************************************************/

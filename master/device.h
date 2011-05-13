@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -43,7 +39,6 @@
 
 #include <linux/interrupt.h>
 
-#include "../include/ecrt.h"
 #include "../devices/ecdev.h"
 #include "globals.h"
 
@@ -101,8 +96,25 @@ struct ec_device
     struct timeval timeval_poll;
 #endif
     unsigned long jiffies_poll; /**< jiffies of last poll */
-    unsigned int tx_count; /**< number of frames sent */
-    unsigned int rx_count; /**< number of frames received */
+
+    // Frame statistics
+    u64 tx_count; /**< Number of frames sent. */
+    u64 last_tx_count; /**< Number of frames sent of last statistics cycle. */
+    u64 rx_count; /**< Number of frames received. */
+    u64 tx_bytes; /**< Number of frames sent. */
+    u64 last_tx_bytes; /**< Number of bytes sent of last statistics cycle. */
+    u64 tx_errors; /**< Number of transmit errors. */
+    u64 last_loss; /**< Tx/Rx difference of last statistics cycle. */
+    unsigned int tx_frame_rates[EC_RATE_COUNT]; /**< Transmit rates in
+                                                  frames/s for different
+                                                  statistics cycle periods. */
+    unsigned int tx_byte_rates[EC_RATE_COUNT]; /**< Transmit rates in byte/s
+                                                 for different statistics
+                                                 cycle periods. */
+    int loss_rates[EC_RATE_COUNT]; /**< Frame loss rates for different
+                                     statistics cycle periods. */
+    unsigned long stats_jiffies; /**< Jiffies of last statistic cycle. */
+
 #ifdef EC_DEBUG_IF
     ec_debug_t dbg; /**< debug device */
 #endif
@@ -128,6 +140,7 @@ int ec_device_close(ec_device_t *);
 void ec_device_poll(ec_device_t *);
 uint8_t *ec_device_tx_data(ec_device_t *);
 void ec_device_send(ec_device_t *, size_t);
+void ec_device_clear_stats(ec_device_t *);
 
 #ifdef EC_DEBUG_RING
 void ec_device_debug_ring_append(ec_device_t *, ec_debug_frame_dir_t,

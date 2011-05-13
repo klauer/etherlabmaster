@@ -2,32 +2,28 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
@@ -44,10 +40,10 @@
 
 /*****************************************************************************/
 
-/** Pdo entry constructor.
+/** PDO entry constructor.
  */
 void ec_pdo_entry_init(
-        ec_pdo_entry_t *entry /**< Pdo entry. */
+        ec_pdo_entry_t *entry /**< PDO entry. */
         )
 {
     entry->name = NULL;
@@ -55,11 +51,14 @@ void ec_pdo_entry_init(
 
 /*****************************************************************************/
 
-/** Pdo entry copy constructor.
+/** PDO entry copy constructor.
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ec_pdo_entry_init_copy(
-        ec_pdo_entry_t *entry, /**< Pdo entry. */
-        const ec_pdo_entry_t *other /**< Pdo entry to copy from. */
+        ec_pdo_entry_t *entry, /**< PDO entry. */
+        const ec_pdo_entry_t *other /**< PDO entry to copy from. */
         )
 {
     entry->index = other->index;
@@ -67,17 +66,14 @@ int ec_pdo_entry_init_copy(
     entry->name = NULL;
     entry->bit_length = other->bit_length;
 
-    if (ec_pdo_entry_set_name(entry, other->name))
-        return -1;
-
-    return 0;
+    return ec_pdo_entry_set_name(entry, other->name);
 }
 
 /*****************************************************************************/
 
-/** Pdo entry destructor.
+/** PDO entry destructor.
  */
-void ec_pdo_entry_clear(ec_pdo_entry_t *entry /**< Pdo entry. */)
+void ec_pdo_entry_clear(ec_pdo_entry_t *entry /**< PDO entry. */)
 {
     if (entry->name)
         kfree(entry->name);
@@ -85,10 +81,13 @@ void ec_pdo_entry_clear(ec_pdo_entry_t *entry /**< Pdo entry. */)
 
 /*****************************************************************************/
 
-/** Set Pdo entry name.
+/** Set PDO entry name.
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
  */
 int ec_pdo_entry_set_name(
-        ec_pdo_entry_t *entry, /**< Pdo entry. */
+        ec_pdo_entry_t *entry, /**< PDO entry. */
         const char *name /**< New name. */
         )
 {
@@ -102,8 +101,8 @@ int ec_pdo_entry_set_name(
 
     if (name && (len = strlen(name))) {
         if (!(entry->name = (char *) kmalloc(len + 1, GFP_KERNEL))) {
-            EC_ERR("Failed to allocate Pdo entry name.\n");
-            return -1;
+            EC_ERR("Failed to allocate PDO entry name.\n");
+            return -ENOMEM;
         }
         memcpy(entry->name, name, len + 1);
     } else {
@@ -115,14 +114,14 @@ int ec_pdo_entry_set_name(
 
 /*****************************************************************************/
 
-/** Compares two Pdo entries.
+/** Compares two PDO entries.
  *
  * \retval 1 The entries are equal.
  * \retval 0 The entries differ.
  */
 int ec_pdo_entry_equal(
-        const ec_pdo_entry_t *entry1, /**< First Pdo entry. */
-        const ec_pdo_entry_t *entry2 /**< Second Pdo entry. */
+        const ec_pdo_entry_t *entry1, /**< First PDO entry. */
+        const ec_pdo_entry_t *entry2 /**< Second PDO entry. */
         )
 {
     return entry1->index == entry2->index

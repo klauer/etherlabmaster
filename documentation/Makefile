@@ -13,18 +13,28 @@ LATEX_OPTIONS := -file-line-error-style
 COMMANDS := \
 	alias \
 	config \
+	cstruct \
 	data \
 	debug \
 	domains \
+	download \
+	eoe \
+	foe_read \
+	foe_write \
+	graph \
 	master \
 	pdos \
+	reg_read \
+	reg_write \
 	sdos \
-	download \
-	upload \
-	slaves \
 	sii_read \
 	sii_write \
+	slaves \
+	soe_read \
+	soe_write \
 	states \
+	upload \
+	version \
 	xml
 
 EXT_PREFIX := external/ethercat_
@@ -42,18 +52,31 @@ $(EXT_FILES): $(ETHERCAT_CMD)
 	$(shell $(subst $(EXT_PREFIX),$(ETHERCAT_HELP) ,$@) > $@)
 
 pdf: $(EXT_FILES)
+	$(MAKE) -C images
+	$(MAKE) -C graphs
 	pdflatex $(LATEX_OPTIONS) $(FILE)
 
 index:
 	makeindex $(FILE)
-	makeindex $(FILE).glo -s nomencl.ist -o $(FILE).gls
+	makeindex $(FILE).nlo -s nomencl.ist -o $(FILE).nls
 
 clean:
-	@rm -f $(FILE).aux $(FILE).dvi $(FILE).idx \
-		$(FILE).ilg $(FILE).ind $(FILE).log \
-		$(FILE).out $(FILE).pdf $(FILE).ps \
-		$(FILE).toc $(FILE).lot $(FILE).lof \
-		$(FILE).lol $(FILE).glo $(FILE).gls \
-		images/*.bak *~
+	@rm -f \
+		$(FILE).aux \
+		$(FILE).dvi \
+		$(FILE).idx \
+		$(FILE).ilg \
+		$(FILE).ind \
+		$(FILE).lof \
+		$(FILE).log \
+		$(FILE).lol \
+		$(FILE).lot \
+		$(FILE).nlo \
+		$(FILE).nls \
+		$(FILE).out \
+		$(FILE).pdf \
+		$(FILE).toc \
+		*~ \
+		images/*.bak
 
 #------------------------------------------------------------------------------

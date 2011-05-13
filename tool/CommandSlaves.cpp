@@ -1,15 +1,40 @@
 /*****************************************************************************
  *
- * $Id$
+ *  $Id$
+ *
+ *  Copyright (C) 2006-2009  Florian Pose, Ingenieurgemeinschaft IgH
+ *
+ *  This file is part of the IgH EtherCAT Master.
+ *
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
+ *
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
+ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  ****************************************************************************/
 
 #include <iostream>
 #include <iomanip>
 #include <list>
+#include <string.h>
 using namespace std;
 
 #include "CommandSlaves.h"
+#include "MasterDevice.h"
 
 /*****************************************************************************/
 
@@ -20,11 +45,11 @@ CommandSlaves::CommandSlaves():
 
 /*****************************************************************************/
 
-string CommandSlaves::helpString() const
+string CommandSlaves::helpString(const string &binaryBaseName) const
 {
     stringstream str;
 
-    str << getName() << " [OPTIONS]" << endl
+    str << binaryBaseName << " " << getName() << " [OPTIONS]" << endl
         << endl
         << getBriefDescription() << endl
         << endl
@@ -81,17 +106,32 @@ string CommandSlaves::helpString() const
 
 /****************************************************************************/
 
-void CommandSlaves::execute(MasterDevice &m, const StringVector &args)
+void CommandSlaves::execute(const StringVector &args)
 {
+	MasterIndexList masterIndices;
     SlaveList slaves;
+    bool doIndent;
     
-    m.open(MasterDevice::Read);
-    slaves = selectedSlaves(m);
+    if (args.size()) {
+        stringstream err;
+        err << "'" << getName() << "' takes no arguments!";
+        throwInvalidUsageException(err);
+    }
 
-    if (getVerbosity() == Verbose) {
-        showSlaves(m, slaves);
-    } else {
-        listSlaves(m, slaves);
+	masterIndices = getMasterIndices();
+    doIndent = masterIndices.size() > 1;
+    MasterIndexList::const_iterator mi;
+    for (mi = masterIndices.begin();
+            mi != masterIndices.end(); mi++) {
+        MasterDevice m(*mi);
+        m.open(MasterDevice::Read);
+        slaves = selectedSlaves(m);
+
+        if (getVerbosity() == Verbose) {
+            showSlaves(m, slaves);
+        } else {
+            listSlaves(m, slaves, doIndent);
+        }
     }
 }
 
@@ -99,7 +139,8 @@ void CommandSlaves::execute(MasterDevice &m, const StringVector &args)
 
 void CommandSlaves::listSlaves(
         MasterDevice &m,
-        const SlaveList &slaves
+        const SlaveList &slaves,
+        bool doIndent
         )
 {
     ec_ioctl_master_t master;
@@ -113,6 +154,7 @@ void CommandSlaves::listSlaves(
     stringstream str;
     unsigned int maxPosWidth = 0, maxAliasWidth = 0,
                  maxRelPosWidth = 0, maxStateWidth = 0;
+    string indent(doIndent ? "  " : "");
     
     m.getMaster(&master);
 
@@ -169,8 +211,12 @@ void CommandSlaves::listSlaves(
         aliasIndex++;
     }
 
+    if (infoList.size() && doIndent) {
+        cout << "Master" << dec << m.getIndex() << endl;
+    }
+
     for (iter = infoList.begin(); iter != infoList.end(); iter++) {
-        cout << setfill(' ') << right
+        cout << indent << setfill(' ') << right
             << setw(maxPosWidth) << iter->pos << "  "
             << setw(maxAliasWidth) << iter->alias
             << ":" << left
@@ -189,11 +235,11 @@ void CommandSlaves::showSlaves(
         )
 {
     SlaveList::const_iterator si;
-    list<string> protoList;
-    list<string>::const_iterator protoIter;
+    int i;
 
     for (si = slaves.begin(); si != slaves.end(); si++) {
-        cout << "=== Slave " << dec << si->position << " ===" << endl;
+        cout << "=== Master " << dec << m.getIndex()
+            << ", Slave " << dec << si->position << " ===" << endl;
 
         if (si->alias)
             cout << "Alias: " << si->alias << endl;
@@ -212,14 +258,112 @@ void CommandSlaves::showSlaves(
             << "  Serial number:   0x"
             << setw(8) << si->serial_number << endl;
 
+        cout << "DL information:" << endl
+            << "  FMMU bit operation: "
+            << (si->fmmu_bit ? "yes" : "no") << endl
+            << "  Distributed clocks: ";
+        if (si->dc_supported) {
+            if (si->has_dc_system_time) {
+                cout << "yes, ";
+                switch (si->dc_range) {
+                    case EC_DC_32:
+                        cout << "32 bit";
+                        break;
+                    case EC_DC_64:
+                        cout << "64 bit";
+                        break;
+                    default:
+                        cout << "???";
+                }
+                cout << endl;
+            } else {
+                cout << "yes, delay measurement only" << endl;
+            }
+            cout << "  DC system time transmission delay: "
+                << dec << si->transmission_delay << " ns" << endl;
+        } else {
+            cout << "no" << endl;
+        }
+
+        cout << "Port  Type  Link  Loop    Signal  NextSlave";
+        if (si->dc_supported)
+            cout << "  RxTime [ns]  Diff [ns]   NextDc [ns]";
+        cout << endl;
+            
+        for (i = 0; i < EC_MAX_PORTS; i++) {
+            cout << "   " << i << "  " << setfill(' ') << left << setw(4);
+            switch (si->ports[i].desc) {
+                case EC_PORT_NOT_IMPLEMENTED:
+                    cout << "N/A";
+                    break;
+                case EC_PORT_NOT_CONFIGURED:
+                    cout << "N/C";
+                    break;
+                case EC_PORT_EBUS:
+                    cout << "EBUS";
+                    break;
+                case EC_PORT_MII:
+                    cout << "MII";
+                    break;
+                default:
+                    cout << "???";
+            }
+
+            cout << "  " << setw(4)
+                << (si->ports[i].link.link_up ? "up" : "down")
+                << "  " << setw(6)
+                << (si->ports[i].link.loop_closed ? "closed" : "open")
+                << "  " << setw(6)
+                << (si->ports[i].link.signal_detected ? "yes" : "no")
+                << "  " << setw(9) << right;
+
+            if (si->ports[i].next_slave != 0xffff) {
+                cout << dec << si->ports[i].next_slave;
+            } else {
+                cout << "-";
+            }
+            
+            if (si->dc_supported) {
+                cout << "  " << setw(11) << right;
+                if (!si->ports[i].link.loop_closed) {
+                    cout << dec << si->ports[i].receive_time;
+                } else {
+                    cout << "-";
+                }
+                cout << "  " << setw(10);
+                if (!si->ports[i].link.loop_closed) {
+                    cout << si->ports[i].receive_time - si->ports[0].receive_time;
+                } else {
+                    cout << "-";
+                }
+                cout << "  " << setw(10);
+                if (!si->ports[i].link.loop_closed) {
+                    cout << si->ports[i].delay_to_next_dc;
+                } else {
+                    cout << "-";
+                }
+            }
+
+            cout << endl;
+        }
+
         if (si->mailbox_protocols) {
+            list<string> protoList;
+            list<string>::const_iterator protoIter;
+
             cout << "Mailboxes:" << endl
-                << "  RX: 0x"
-                << hex << setw(4) << si->rx_mailbox_offset << "/"
-                << dec << si->rx_mailbox_size
+                << "  Bootstrap RX: 0x" << setfill('0')
+                << hex << setw(4) << si->boot_rx_mailbox_offset << "/"
+                << dec << si->boot_rx_mailbox_size
                 << ", TX: 0x"
-                << hex << setw(4) << si->tx_mailbox_offset << "/"
-                << dec << si->tx_mailbox_size << endl
+                << hex << setw(4) << si->boot_tx_mailbox_offset << "/"
+                << dec << si->boot_tx_mailbox_size << endl
+                << "  Standard  RX: 0x"
+                << hex << setw(4) << si->std_rx_mailbox_offset << "/"
+                << dec << si->std_rx_mailbox_size
+                << ", TX: 0x"
+                << hex << setw(4) << si->std_tx_mailbox_offset << "/"
+                << dec << si->std_tx_mailbox_size << endl
                 << "  Supported protocols: ";
 
             if (si->mailbox_protocols & EC_MBOX_AOE) {
@@ -259,20 +403,20 @@ void CommandSlaves::showSlaves(
 
             if (si->mailbox_protocols & EC_MBOX_COE) {
                 cout << "  CoE details:" << endl
-                    << "    Enable Sdo: "
+                    << "    Enable SDO: "
                     << (si->coe_details.enable_sdo ? "yes" : "no") << endl
-                    << "    Enable Sdo Info: "
+                    << "    Enable SDO Info: "
                     << (si->coe_details.enable_sdo_info ? "yes" : "no") << endl
-                    << "    Enable Pdo Assign: "
+                    << "    Enable PDO Assign: "
                     << (si->coe_details.enable_pdo_assign
                             ? "yes" : "no") << endl
-                    << "    Enable Pdo Configuration: "
+                    << "    Enable PDO Configuration: "
                     << (si->coe_details.enable_pdo_configuration
                             ? "yes" : "no") << endl
                     << "    Enable Upload at startup: "
                     << (si->coe_details.enable_upload_at_startup
                             ? "yes" : "no") << endl
-                    << "    Enable Sdo complete access: "
+                    << "    Enable SDO complete access: "
                     << (si->coe_details.enable_sdo_complete_access
                             ? "yes" : "no") << endl;
             }

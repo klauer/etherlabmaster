@@ -2,39 +2,46 @@
  *
  *  $Id$
  *
- *  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+ *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
  *  This file is part of the IgH EtherCAT Master.
  *
- *  The IgH EtherCAT Master is free software; you can redistribute it
- *  and/or modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2 of the
- *  License, or (at your option) any later version.
+ *  The IgH EtherCAT Master is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License version 2, as
+ *  published by the Free Software Foundation.
  *
- *  The IgH EtherCAT Master is distributed in the hope that it will be
- *  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ *  Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with the IgH EtherCAT Master; if not, write to the Free Software
+ *  You should have received a copy of the GNU General Public License along
+ *  with the IgH EtherCAT Master; if not, write to the Free Software
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
- *  The right to use EtherCAT Technology is granted and comes free of
- *  charge under condition of compatibility of product made by
- *  Licensee. People intending to distribute/sell products based on the
- *  code, have to sign an agreement to guarantee that products using
- *  software based on IgH EtherCAT master stay compatible with the actual
- *  EtherCAT specification (which are released themselves as an open
- *  standard) as the (only) precondition to have the right to use EtherCAT
- *  Technology, IP and trade marks.
+ *  ---
+ *
+ *  The license mentioned above concerns the source code only. Using the
+ *  EtherCAT technology and brand is only permitted in compliance with the
+ *  industrial property and similar rights of Beckhoff Automation GmbH.
  *
  *****************************************************************************/
 
+#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/timer.h>
-#include <linux/spinlock.h>
 #include <linux/interrupt.h>
+#include <linux/err.h>
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 34)
+#include <linux/slab.h>
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)
+#include <linux/semaphore.h>
+#else
+#include <asm/semaphore.h>
+#endif
 
 #include "../../include/ecrt.h" // EtherCAT realtime interface
 
@@ -48,6 +55,7 @@
 #define EL3152_ALT_PDOS 0
 #define EXTERNAL_MEMORY 1
 #define SDO_ACCESS      0
+#define VOE_ACCESS      0
 
 #define PFX "ec_mini: "
 
@@ -56,7 +64,7 @@
 // EtherCAT
 static ec_master_t *master = NULL;
 static ec_master_state_t master_state = {};
-spinlock_t master_lock = SPIN_LOCK_UNLOCKED;
+struct semaphore master_sem;
 
 static ec_domain_t *domain1 = NULL;
 static ec_domain_state_t domain1_state = {};
@@ -72,15 +80,15 @@ static struct timer_list timer;
 // process data
 static uint8_t *domain1_pd; // process data memory
 
-#define AnaInSlavePos  0, 1
-#define AnaOutSlavePos 0, 2
+#define AnaInSlavePos  0, 2
+#define AnaOutSlavePos 0, 1
 #define DigOutSlavePos 0, 3
 
 #define Beckhoff_EL2004 0x00000002, 0x07D43052
 #define Beckhoff_EL3152 0x00000002, 0x0c503052
 #define Beckhoff_EL4102 0x00000002, 0x10063052
 
-// offsets for Pdo entries
+// offsets for PDO entries
 static unsigned int off_ana_in;
 static unsigned int off_ana_out;
 static unsigned int off_dig_out;
@@ -184,15 +192,19 @@ static ec_sync_info_t el2004_syncs[] = {
 static ec_sdo_request_t *sdo;
 #endif
 
+#if VOE_ACCESS
+static ec_voe_handler_t *voe;
+#endif
+
 /*****************************************************************************/
 
 void check_domain1_state(void)
 {
     ec_domain_state_t ds;
 
-    spin_lock(&master_lock);
+    down(&master_sem);
     ecrt_domain_state(domain1, &ds);
-    spin_unlock(&master_lock);
+    up(&master_sem);
 
     if (ds.working_counter != domain1_state.working_counter)
         printk(KERN_INFO PFX "Domain1: WC %u.\n", ds.working_counter);
@@ -208,9 +220,9 @@ void check_master_state(void)
 {
     ec_master_state_t ms;
 
-    spin_lock(&master_lock);
+    down(&master_sem);
     ecrt_master_state(master, &ms);
-    spin_unlock(&master_lock);
+    up(&master_sem);
 
     if (ms.slaves_responding != master_state.slaves_responding)
         printk(KERN_INFO PFX "%u slave(s).\n", ms.slaves_responding);
@@ -228,9 +240,9 @@ void check_slave_config_states(void)
 {
     ec_slave_config_state_t s;
 
-    spin_lock(&master_lock);
+    down(&master_sem);
     ecrt_slave_config_state(sc_ana_in, &s);
-    spin_unlock(&master_lock);
+    up(&master_sem);
 
     if (s.al_state != sc_ana_in_state.al_state)
         printk(KERN_INFO PFX "AnaIn: State 0x%02X.\n", s.al_state);
@@ -249,20 +261,45 @@ void check_slave_config_states(void)
 void read_sdo(void)
 {
     switch (ecrt_sdo_request_state(sdo)) {
-        case EC_SDO_REQUEST_UNUSED: // request was not used yet
+        case EC_REQUEST_UNUSED: // request was not used yet
             ecrt_sdo_request_read(sdo); // trigger first read
             break;
-        case EC_SDO_REQUEST_BUSY:
+        case EC_REQUEST_BUSY:
             printk(KERN_INFO PFX "Still busy...\n");
             break;
-        case EC_SDO_REQUEST_SUCCESS:
-            printk(KERN_INFO PFX "Sdo value: 0x%04X\n",
+        case EC_REQUEST_SUCCESS:
+            printk(KERN_INFO PFX "SDO value: 0x%04X\n",
                     EC_READ_U16(ecrt_sdo_request_data(sdo)));
             ecrt_sdo_request_read(sdo); // trigger next read
             break;
-        case EC_SDO_REQUEST_ERROR:
-            printk(KERN_INFO PFX "Failed to read Sdo!\n");
+        case EC_REQUEST_ERROR:
+            printk(KERN_INFO PFX "Failed to read SDO!\n");
             ecrt_sdo_request_read(sdo); // retry reading
+            break;
+    }
+}
+#endif
+
+/*****************************************************************************/
+
+#if VOE_ACCESS
+void read_voe(void)
+{
+    switch (ecrt_voe_handler_execute(voe)) {
+        case EC_REQUEST_UNUSED:
+            ecrt_voe_handler_read(voe); // trigger first read
+            break;
+        case EC_REQUEST_BUSY:
+            printk(KERN_INFO PFX "VoE read still busy...\n");
+            break;
+        case EC_REQUEST_SUCCESS:
+            printk(KERN_INFO PFX "VoE received.\n");
+            // get data via ecrt_voe_handler_data(voe)
+            ecrt_voe_handler_read(voe); // trigger next read
+            break;
+        case EC_REQUEST_ERROR:
+            printk(KERN_INFO PFX "Failed to read VoE data!\n");
+            ecrt_voe_handler_read(voe); // retry reading
             break;
     }
 }
@@ -273,10 +310,10 @@ void read_sdo(void)
 void cyclic_task(unsigned long data)
 {
     // receive process data
-    spin_lock(&master_lock);
+    down(&master_sem);
     ecrt_master_receive(master);
     ecrt_domain_process(domain1);
-    spin_unlock(&master_lock);
+    up(&master_sem);
 
     // check process data state (optional)
     check_domain1_state();
@@ -296,8 +333,12 @@ void cyclic_task(unsigned long data)
         check_slave_config_states();
         
 #if SDO_ACCESS
-        // read process data Sdo
+        // read process data SDO
         read_sdo();
+#endif
+
+#if VOE_ACCESS
+        read_voe();
 #endif
     }
 
@@ -305,10 +346,9 @@ void cyclic_task(unsigned long data)
     EC_WRITE_U8(domain1_pd + off_dig_out, blink ? 0x06 : 0x09);
 
     // send process data
-    spin_lock(&master_lock);
     ecrt_domain_queue(domain1);
+    up(&master_sem);
     ecrt_master_send(master);
-    spin_unlock(&master_lock);
 
     // restart timer
     timer.expires += HZ / FREQUENCY;
@@ -317,23 +357,25 @@ void cyclic_task(unsigned long data)
 
 /*****************************************************************************/
 
-int request_lock(void *data)
+void request_lock_callback(void *cb_data)
 {
-    spin_lock(&master_lock);
-    return 0; // access allowed
+    ec_master_t *m = (ec_master_t *) cb_data;
+    down(&master_sem);
 }
 
 /*****************************************************************************/
 
-void release_lock(void *data)
+void release_lock_callback(void *cb_data)
 {
-    spin_unlock(&master_lock);
+    ec_master_t *m = (ec_master_t *) cb_data;
+    up(&master_sem);
 }
 
 /*****************************************************************************/
 
 int __init init_mini_module(void)
 {
+    int ret = -1;
 #if CONFIGURE_PDOS
     ec_slave_config_t *sc;
 #endif
@@ -343,12 +385,15 @@ int __init init_mini_module(void)
     
     printk(KERN_INFO PFX "Starting...\n");
 
-    if (!(master = ecrt_request_master(0))) {
-        printk(KERN_ERR PFX "Requesting master 0 failed!\n");
+    master = ecrt_request_master(0);
+    if (!master) {
+        ret = -EBUSY; 
+        printk(KERN_ERR PFX "Requesting master 0 failed.\n");
         goto out_return;
     }
 
-    ecrt_master_callbacks(master, request_lock, release_lock, NULL);
+    sema_init(&master_sem, 1);
+    ecrt_master_callbacks(master, request_lock_callback, release_lock_callback, master);
 
     printk(KERN_INFO PFX "Registering domain...\n");
     if (!(domain1 = ecrt_master_create_domain(master))) {
@@ -363,9 +408,9 @@ int __init init_mini_module(void)
     }
 
 #if CONFIGURE_PDOS
-    printk(KERN_INFO PFX "Configuring Pdos...\n");
+    printk(KERN_INFO PFX "Configuring PDOs...\n");
     if (ecrt_slave_config_pdos(sc_ana_in, EC_END, el3152_syncs)) {
-        printk(KERN_ERR PFX "Failed to configure Pdos.\n");
+        printk(KERN_ERR PFX "Failed to configure PDOs.\n");
         goto out_release_master;
     }
 
@@ -376,7 +421,7 @@ int __init init_mini_module(void)
     }
 
     if (ecrt_slave_config_pdos(sc, EC_END, el4102_syncs)) {
-        printk(KERN_ERR PFX "Failed to configure Pdos.\n");
+        printk(KERN_ERR PFX "Failed to configure PDOs.\n");
         goto out_release_master;
     }
 
@@ -387,23 +432,31 @@ int __init init_mini_module(void)
     }
 
     if (ecrt_slave_config_pdos(sc, EC_END, el2004_syncs)) {
-        printk(KERN_ERR PFX "Failed to configure Pdos.\n");
+        printk(KERN_ERR PFX "Failed to configure PDOs.\n");
         goto out_release_master;
     }
 #endif
 
 #if SDO_ACCESS
-    printk(KERN_INFO PFX "Creating Sdo requests...\n");
+    printk(KERN_INFO PFX "Creating SDO requests...\n");
     if (!(sdo = ecrt_slave_config_create_sdo_request(sc_ana_in, 0x3102, 2, 2))) {
-        printk(KERN_ERR PFX "Failed to create Sdo request.\n");
+        printk(KERN_ERR PFX "Failed to create SDO request.\n");
         goto out_release_master;
     }
     ecrt_sdo_request_timeout(sdo, 500); // ms
 #endif
 
-    printk(KERN_INFO PFX "Registering Pdo entries...\n");
+#if VOE_ACCESS
+    printk(KERN_INFO PFX "Creating VoE handlers...\n");
+    if (!(voe = ecrt_slave_config_create_voe_handler(sc_ana_in, 1000))) {
+        printk(KERN_ERR PFX "Failed to create VoE handler.\n");
+        goto out_release_master;
+    }
+#endif
+
+    printk(KERN_INFO PFX "Registering PDO entries...\n");
     if (ecrt_domain_reg_pdo_entry_list(domain1, domain1_regs)) {
-        printk(KERN_ERR PFX "Pdo entry registration failed!\n");
+        printk(KERN_ERR PFX "PDO entry registration failed!\n");
         goto out_release_master;
     }
 
@@ -451,7 +504,7 @@ out_release_master:
     ecrt_release_master(master);
 out_return:
     printk(KERN_ERR PFX "Failed to load. Aborting.\n");
-    return -1;
+    return ret;
 }
 
 /*****************************************************************************/

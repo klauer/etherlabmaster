@@ -6,32 +6,30 @@
 #
 #  $Id$
 #
-#  Copyright (C) 2006  Florian Pose, Ingenieurgemeinschaft IgH
+#  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
 #
 #  This file is part of the IgH EtherCAT Master.
 #
-#  The IgH EtherCAT Master is free software; you can redistribute it
-#  and/or modify it under the terms of the GNU General Public License
-#  as published by the Free Software Foundation; either version 2 of the
-#  License, or (at your option) any later version.
+#  The IgH EtherCAT Master is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU General Public License version 2, as
+#  published by the Free Software Foundation.
 #
-#  The IgH EtherCAT Master is distributed in the hope that it will be
-#  useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
+#  The IgH EtherCAT Master is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+#  Public License for more details.
 #
-#  You should have received a copy of the GNU General Public License
-#  along with the IgH EtherCAT Master; if not, write to the Free Software
+#  You should have received a copy of the GNU General Public License along
+#  with the IgH EtherCAT Master; if not, write to the Free Software
 #  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
-#  The right to use EtherCAT Technology is granted and comes free of
-#  charge under condition of compatibility of product made by
-#  Licensee. People intending to distribute/sell products based on the
-#  code, have to sign an agreement to guarantee that products using
-#  software based on IgH EtherCAT master stay compatible with the actual
-#  EtherCAT specification (which are released themselves as an open
-#  standard) as the (only) precondition to have the right to use EtherCAT
-#  Technology, IP and trade marks.
+#  ---
+#  
+#  The license mentioned above concerns the source code only. Using the EtherCAT
+#  technology and brand is only permitted in compliance with the industrial
+#  property and similar rights of Beckhoff Automation GmbH.
+#
+#  vim: expandtab
 #
 #------------------------------------------------------------------------------
 
@@ -53,6 +51,7 @@ MODPROBE=/sbin/modprobe
 RMMOD=/sbin/rmmod
 MODINFO=/sbin/modinfo
 ETHERCAT=@prefix@/bin/ethercat
+MASTER_ARGS=
 
 #------------------------------------------------------------------------------
 
@@ -61,9 +60,9 @@ ETHERCAT_CONFIG=/etc/sysconfig/ethercat
 if [ ! -r ${ETHERCAT_CONFIG} ]; then
     echo ${ETHERCAT_CONFIG} not existing;
     if [ "${1}" = "stop" ]; then
-	exit 0
+        exit 0
     else
-	exit 6
+        exit 6
     fi
 fi
 
@@ -71,8 +70,7 @@ fi
 
 #------------------------------------------------------------------------------
 
-function exit_success()
-{
+exit_success() {
     if [ -r /etc/rc.status ]; then
         rc_reset
         rc_status -v
@@ -85,8 +83,7 @@ function exit_success()
 
 #------------------------------------------------------------------------------
 
-function exit_fail()
-{
+exit_fail() {
     if [ -r /etc/rc.status ]; then
         rc_failed
         rc_status -v
@@ -99,8 +96,7 @@ function exit_fail()
 
 #------------------------------------------------------------------------------
 
-function print_running()
-{
+print_running() {
     if [ -r /etc/rc.status ]; then
         rc_reset
         rc_status -v
@@ -111,8 +107,7 @@ function print_running()
 
 #------------------------------------------------------------------------------
 
-function print_dead()
-{
+print_dead() {
     if [ -r /etc/rc.status ]; then
         rc_failed
         rc_status -v
@@ -123,8 +118,7 @@ function print_dead()
 
 #------------------------------------------------------------------------------
 
-function parse_mac_address()
-{
+parse_mac_address() {
     if [ -z "${1}" ]; then
         MAC=""
     elif echo ${1} | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'; then
@@ -171,7 +165,7 @@ start)
     done
 
     # load master module
-    if ! ${MODPROBE} ${MODPROBE_FLAGS} ec_master \
+    if ! ${MODPROBE} ${MODPROBE_FLAGS} ec_master ${MASTER_ARGS} \
             main_devices=${DEVICES} backup_devices=${BACKUPS}; then
         exit_fail
     fi
@@ -182,13 +176,17 @@ start)
         if ! ${MODINFO} ${ECMODULE} > /dev/null; then
             continue # ec_* module not found
         fi
-        if lsmod | grep "^${MODULE} " > /dev/null; then
-            if ! ${RMMOD} ${MODULE}; then
-                exit_fail
+        if [ ${MODULE} != "generic" ]; then
+            if lsmod | grep "^${MODULE} " > /dev/null; then
+                if ! ${RMMOD} ${MODULE}; then
+                    exit_fail
+                fi
             fi
         fi
         if ! ${MODPROBE} ${MODPROBE_FLAGS} ${ECMODULE}; then
-            ${MODPROBE} ${MODPROBE_FLAGS} ${MODULE} # try to restore module
+            if [ ${MODULE} != "generic" ]; then
+                ${MODPROBE} ${MODPROBE_FLAGS} ${MODULE} # try to restore
+            fi
             exit_fail
         fi
     done
@@ -214,8 +212,10 @@ stop)
 
     # reload previous modules
     for MODULE in ${DEVICE_MODULES}; do
-        if ! ${MODPROBE} ${MODPROBE_FLAGS} ${MODULE}; then
-            echo Warning: Failed to restore ${MODULE}.
+        if [ ${MODULE} != "generic" ]; then
+            if ! ${MODPROBE} ${MODPROBE_FLAGS} ${MODULE}; then
+                echo Warning: Failed to restore ${MODULE}.
+            fi
         fi
     done
 
