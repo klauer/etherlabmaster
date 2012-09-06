@@ -38,7 +38,7 @@
  * for realtime modules that want to use EtherCAT. There are functions to
  * request a master, to map process data, to communicate with slaves via CoE
  * and to configure and activate the bus.
- * 
+ *
  * Changed since 1.5:
  *
  * - Added redundancy_active flag to ec_domain_state_t.

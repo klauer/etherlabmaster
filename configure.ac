@@ -20,7 +20,7 @@
 #  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
 #  ---
-#  
+#
 #  The license mentioned above concerns the source code only. Using the
 #  EtherCAT technology and brand is only permitted in compliance with the
 #  industrial property and similar rights of Beckhoff Automation GmbH.
@@ -92,8 +92,14 @@ if test -z "$kernelrelease"; then
     AC_MSG_ERROR([Failed to extract Linux kernel version!])
 fi
 
-# Extract three numbers from kernel release string
-linuxversion=`echo $kernelrelease | grep -oE "^[[0-9]]+\.[[0-9]]+\.[[0-9]]+"`
+if test ${kernelrelease%%.*} -gt 2; then
+    regex="^[[0-9]]+\.[[0-9]]+"
+else
+    regex="^[[0-9]]+\.[[0-9]]+\.[[0-9]]+"
+fi
+
+# Extract numbers from kernel release
+linuxversion=`echo $kernelrelease | grep -oE "$regex"`
 
 AC_SUBST(LINUX_SOURCE_DIR,[$sourcedir])
 AC_MSG_RESULT([$LINUX_SOURCE_DIR (Kernel $linuxversion)])

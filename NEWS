@@ -10,8 +10,11 @@ Changes in 1.5.1:
 
 * Fixed reset of allow_scanning flag if ecrt_master_activate() was not called.
 * Fixed missing distribution for r8169 for 2.6.32 and e1000 driver for 2.6.31.
-* Added r8169, e100, e1000 and e1000e drivers for 2.6.35.
+* Added e100 and e1000 drivers for 2.6.35.
+* Added r8169 driver for 2.6.35 (F. Pose), 2.6.36 (J. Kunz), 3.2 (J. Kunz).
+* Added e1000e driver for 2.6.35 (F. Pose), 3.2 (J. Kunz).
 * Added fix for ESC port order (DC delay calculation).
+* Added e1000 driver for kernel 3.0.
 
 Changes in 1.5.0:
 
@@ -34,8 +37,9 @@ Changes in 1.5.0:
     - Added e100 driver for 2.6.29, thanks to Andre Puschmann.
     - Added e100 driver for 2.6.31.
     - Added e100 driver for 2.6.32.
-    - Added e100 driver for 2.6.33, thanks for J. Kunz.
+    - Added e100 driver for 2.6.33, thanks to J. Kunz.
     - Added e100 driver for 2.6.37.
+    - Added e100 driver for 3.0.
 * Added 8139too driver for kernels 2.6.25 (F. Pose), 2.6.26 (M. Luescher),
   2.6.27, 2.6.28, 2.6.29 (M. Goetze), 2.6.31 (F. Pose), 2.6.32 (F. Pose),
   2.6.33 (J. Kunz), 2.6.34 (Malcolm Lewis), 2.6.35 (B. Benner),
@@ -86,7 +90,7 @@ Changes in 1.5.0:
   supports ranges like '0,3,8-10'.
 * A sync manager is always enabled, if it contains registered process data.
 * Added a configuration switch --enable-wildcards to use 0xffffffff as a
-* wildcard for vendor ID and product code.
+  wildcard for vendor ID and product code.
 * Added support for systemd.
 
 Changes in 1.4.0:

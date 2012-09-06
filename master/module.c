@@ -127,7 +127,7 @@ int __init ec_init_module(void)
         ret = ec_mac_parse(macs[i][0], main_devices[i], 0);
         if (ret)
             goto out_class;
-        
+
         if (i < backup_count) {
             ret = ec_mac_parse(macs[i][1], backup_devices[i], 1);
             if (ret)
@@ -137,7 +137,7 @@ int __init ec_init_module(void)
 
     // initialize static master variables
     ec_master_init_static();
-    
+
     if (master_count) {
         if (!(masters = kmalloc(sizeof(ec_master_t) * master_count,
                         GFP_KERNEL))) {
@@ -147,14 +147,14 @@ int __init ec_init_module(void)
             goto out_class;
         }
     }
-    
+
     for (i = 0; i < master_count; i++) {
         ret = ec_master_init(&masters[i], i, macs[i][0], macs[i][1],
                     device_number, class, debug_level);
         if (ret)
             goto out_free_masters;
     }
-    
+
     EC_INFO("%u master%s waiting for devices.\n",
             master_count, (master_count == 1 ? "" : "s"));
     return ret;
@@ -188,12 +188,12 @@ void __exit ec_cleanup_module(void)
 
     if (master_count)
         kfree(masters);
-    
+
     class_destroy(class);
-    
+
     if (master_count)
         unregister_chrdev_region(device_number, master_count);
-    
+
     EC_INFO("Master module cleaned up.\n");
 }
 
@@ -219,14 +219,14 @@ int ec_mac_equal(
         )
 {
     unsigned int i;
-    
+
     for (i = 0; i < ETH_ALEN; i++)
         if (mac1[i] != mac2[i])
             return 0;
 
     return 1;
 }
-                
+
 /*****************************************************************************/
 
 /** Maximum MAC string size.
@@ -246,7 +246,7 @@ ssize_t ec_mac_print(
 {
     off_t off = 0;
     unsigned int i;
-    
+
     for (i = 0; i < ETH_ALEN; i++) {
         off += sprintf(buffer + off, "%02X", mac[i]);
         if (i < ETH_ALEN - 1) off += sprintf(buffer + off, ":");
@@ -265,7 +265,7 @@ int ec_mac_is_zero(
         )
 {
     unsigned int i;
-    
+
     for (i = 0; i < ETH_ALEN; i++)
         if (mac[i])
             return 0;
@@ -283,7 +283,7 @@ int ec_mac_is_broadcast(
         )
 {
     unsigned int i;
-    
+
     for (i = 0; i < ETH_ALEN; i++)
         if (mac[i] != 0xff)
             return 0;
@@ -552,7 +552,7 @@ ec_master_t *ecrt_request_master_err(
         errptr = ERR_PTR(-EINTR);
         goto out_release;
     }
-    
+
     if (master->phase != EC_IDLE) {
         up(&master->device_sem);
         EC_MASTER_ERR(master, "Master still waiting for devices!\n");

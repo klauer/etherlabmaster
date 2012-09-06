@@ -235,14 +235,11 @@ int ecrt_master_get_slave(ec_master_t *master, uint16_t slave_position,
     for ( i = 0; i < EC_MAX_PORTS; i++ ) {
     	slave_info->ports[i].desc = data.ports[i].desc;
     	slave_info->ports[i].link.link_up = data.ports[i].link.link_up;
-    	slave_info->ports[i].link.loop_closed =
-            data.ports[i].link.loop_closed;
-    	slave_info->ports[i].link.signal_detected =
-            data.ports[i].link.signal_detected;
+    	slave_info->ports[i].link.loop_closed = data.ports[i].link.loop_closed;
+    	slave_info->ports[i].link.signal_detected = data.ports[i].link.signal_detected;
     	slave_info->ports[i].receive_time = data.ports[i].receive_time;
     	slave_info->ports[i].next_slave = data.ports[i].next_slave;
-    	slave_info->ports[i].delay_to_next_dc =
-            data.ports[i].delay_to_next_dc;
+    	slave_info->ports[i].delay_to_next_dc = data.ports[i].delay_to_next_dc;
     }
     slave_info->al_state = data.al_state;
     slave_info->error_flag = data.error_flag;
