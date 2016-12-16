@@ -1,0 +1,9 @@
+Patch from http://lists.etherlab.org/pipermail/etherlab-dev/2015/000493.html
+
+BUILDROOT_ROOT=/afs/slac/package/linuxRT/buildroot-2015.02/
+
+./configure --with-linux-dir=${BUILDROOT_ROOT}/buildroot-2015.02-x86_64/output/build/linux-3.18.11 CC=${BUILDROOT_ROOT}/host/linux-x86_64/x86_64/usr/bin/x86_64-buildroot-linux-gnu-gcc CXX=${BUILDROOT_ROOT}/host/linux-x86_64/x86_64/usr/bin/x86_64-buildroot-linux-gnu-g++ --host=x86_64-buildroot-linux-gnu --build=x86_64-unknown-linux-gnu --target=x86_64-buildroot-linux-gnu --disable-8139too --enable-hrtimer build_alias=x86_64-unknown-linux-gnuhost_alias=x86_64-buildroot-linux-gnu target_alias=x86_64-buildroot-linux-gnu --no-create --no-recursion --enable-e1000e
+
+./config.status
+
+make modules
